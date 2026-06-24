@@ -2,12 +2,28 @@
 
 Prototype for a low-friction home clock/status display appliance.
 
+## Memory-Friendly Time Display
+
+- Weekday, prominent and centered: `Wednesday`
+- Time of day, smaller and centered: `Morning`
+- Time, largest and centered, with small `AM` or `PM`
+- Date, centered and smaller: `June 24, 2026`
+
+The simulator follows that layout.
+
 ## Shape
 
 - Target device: Seeed Studio XIAO 7.5" ePaper Panel (`800x480`, ESP32-C3)
 - Firmware direction: PlatformIO + ESP-IDF
 - Device job: provision Wi-Fi, fetch data, render locally, cache last-good screen, report status
 - Server job: decide content and serve one authenticated `/clock` document
+
+## Local Sim
+
+- Linux desktop simulator: LVGL + SDL2 + CMake
+- Shared core UI lives in `core/`; simulator platform code lives in `sim/`
+- Sample config: `sim/sample/config.json`
+- Dev guide: [`sim/README.md`](/home/rhew/repos/mom-clock/sim/README.md)
 
 ## API
 
@@ -31,7 +47,7 @@ Example shape:
       {
         "start": "2026-06-24T08:45:00-04:00",
         "end": "2026-06-24T09:45:00-04:00",
-        "text": "Consultation whith Dr. Who",
+        "text": "Consultation with Dr. Who",
         "location": "Tardis"
       }
     ]
@@ -57,10 +73,10 @@ Create a bearer token and store only its hash:
 ./add-device.py -d "Kitchen clock"
 ```
 
-- Prints the token once for captive-portal entry
+- Prints the token once for device enrollment
 - Saves the hash with the device description
 - Defaults to `devices.jsonl`; override with `-p <path>`
 
 ## Source Notes
 
-Working notes live in [`prototype-docs/`](/home/rhew/repos/mom-clock/prototype-docs).
+Current implementation notes are in the repo: shared code under `core/`, simulator under `sim/`.
