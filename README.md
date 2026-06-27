@@ -1,82 +1,50 @@
-# mom-clock
+# memory-clock
 
-Prototype for a low-friction home clock/status display appliance.
+ESP-IDF firmware for the Seeed Studio reTerminal E1001 (`800x480`, ESP32-S3).
 
-## Memory-Friendly Time Display
+Current firmware behavior:
 
-- Weekday, prominent and centered: `Wednesday`
-- Time of day, smaller and centered: `Morning`
-- Time, largest and centered, with small `AM` or `PM`
-- Date, centered and smaller: `June 24, 2026`
+- Connects to Wi-Fi using `.env`
+- Syncs time from `time.cloudflare.com`
+- Uses New York eastern time
+- Renders a monochrome memory-clock layout:
+  weekday, daypart, large 12-hour time, and long-form date
+- Uses full refresh on 10-minute boundaries and partial refresh between minute changes
 
-The simulator follows that layout.
+## Repo Shape
 
-## Shape
+- The repo root is the ESP-IDF project
+- Display code is in `main/display_port.c`
+- Screen rendering is in `main/banner.c`
+- Wi-Fi and SNTP startup is in `main/main.c` and `main/provisioning.c`
 
-- Target device: Seeed Studio XIAO 7.5" ePaper Panel (`800x480`, ESP32-C3)
-- Firmware direction: PlatformIO + ESP-IDF
-- Device job: provision Wi-Fi, fetch data, render locally, cache last-good screen, report status
-- Server job: decide content and serve one authenticated `/clock` document
+## IDF Setup
 
-## Local Sim
-
-- Linux desktop simulator: LVGL + SDL2 + CMake
-- Shared core UI lives in `core/`; simulator platform code lives in `sim/`
-- Sample config: `sim/sample/config.json`
-- Dev guide: [`sim/README.md`](/home/rhew/repos/mom-clock/sim/README.md)
-
-## API
-
-`GET /clock`
-
-- Auth: `Authorization: Bearer <token>`
-- Response: `200` JSON, plus `304` if conditional fetch is used
-- Errors: `401`/`403` for auth failure, `5xx` for server failure
-
-Example shape:
-
-```json
-{
-  "time": {
-    "timezone": "America/New_York",
-    "ntp": ["time.cloudflare.com", "pool.ntp.org"]
-  },
-  "appointment_group": {
-    "plan": "Freeda will pick you up at *10:00* in the morning.",
-    "appointments": [
-      {
-        "start": "2026-06-24T08:45:00-04:00",
-        "end": "2026-06-24T09:45:00-04:00",
-        "text": "Consultation with Dr. Who",
-        "location": "Tardis"
-      }
-    ]
-  },
-  "messages": ["Drink water."]
-}
-```
-
-Text may include limited inline markup: `**bold**`, `_italic_`.
-
-## States
-
-- `no_data`: show Wi-Fi setup instructions
-- `unconnected_no_reliable_time`: show connection problem
-- `connected`: show time, date, messages, appointments
-- `unconnected_time_synced_since_power`: show time/date plus connection problem
-
-## Add Device
-
-Create a bearer token and store only its hash:
+Install ESP-IDF and load it into your shell. For example, mine is installed in `~/.local`:
 
 ```bash
-./add-device.py -d "Kitchen clock"
+source ~/.local/lib/esp/esp-idf/export.sh
 ```
 
-- Prints the token once for device enrollment
-- Saves the hash with the device description
-- Defaults to `devices.jsonl`; override with `-p <path>`
+Verify the board:
 
-## Source Notes
+```bash
+esptool.py --chip esp32s3 -p /dev/ttyUSB0 chip_id
+```
 
-Current implementation notes are in the repo: shared code under `core/`, simulator under `sim/`.
+## Build And Flash
+
+```bash
+idf.py set-target esp32s3
+edit .env
+idf.py reconfigure
+idf.py build
+idf.py -p /dev/ttyUSB0 flash monitor
+```
+
+If you change `.env` after the first configure, run `idf.py reconfigure` once before rebuilding so the generated `wifi_env.h` is refreshed.
+
+## Checked-In Config
+
+- `sdkconfig` is checked in because it is the known-good ESP-IDF config for the current E1001 firmware.
+- `sdkconfig.defaults` is checked in because it seeds the build with the board's 32 MB flash size before `sdkconfig` exists.

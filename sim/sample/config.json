@@ -1,9 +1,0 @@
-{
-  "timezone": "America/New_York",
-  "ntp": [
-    "time.cloudflare.com",
-    "pool.ntp.org"
-  ],
-  "server_url": "http://localhost:8000/clock",
-  "bearer_token": "replace-with-device-token"
-}
