@@ -28,11 +28,15 @@ enum {
 };
 
 static const font_spec_t k_fonts[] = {
-    {"small", 30,
+    {"ui_small", 30,
      " !\"#$%&'()*+,-./0123456789:;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]abcdefghijklmnopqrstuvwxyz"},
-    {"medium", 44,
+    {"body", 40,
      " !\"#$%&'()*+,-./0123456789:;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]abcdefghijklmnopqrstuvwxyz"},
-    {"large", 120, " 0123456789:amp"},
+    {"date", 34,
+     " !\"#$%&'()*+,-./0123456789:;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]abcdefghijklmnopqrstuvwxyz"},
+    {"weekday", 62,
+     " !\"#$%&'()*+,-./0123456789:;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]abcdefghijklmnopqrstuvwxyz"},
+    {"time", 120, " 0123456789:amp"},
 };
 
 static int append_packed_alpha(uint8_t **data, size_t *size, size_t *capacity, uint8_t alpha)

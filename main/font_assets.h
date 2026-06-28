@@ -4,6 +4,8 @@
 
 #include "font_render.h"
 
-extern const memory_clock_font_t memory_clock_font_small;
-extern const memory_clock_font_t memory_clock_font_medium;
-extern const memory_clock_font_t memory_clock_font_large;
+extern const memory_clock_font_t memory_clock_font_ui_small;
+extern const memory_clock_font_t memory_clock_font_body;
+extern const memory_clock_font_t memory_clock_font_date;
+extern const memory_clock_font_t memory_clock_font_weekday;
+extern const memory_clock_font_t memory_clock_font_time;

@@ -4,12 +4,14 @@ ESP-IDF firmware for the Seeed Studio reTerminal E1001 (`800x480`, ESP32-S3).
 
 Current firmware behavior:
 
-- Connects to Wi-Fi using ssid and password in `.env`
+- Connects to Wi-Fi using `WIFI_SSID` and `WIFI_PASSWORD` from `.env`
 - Syncs time from `time.cloudflare.com`
 - Uses New York Eastern time
-- Renders a monochrome memory-clock layout:
-  weekday, daypart, large 12-hour time, and long-form date
-- Uses full refresh on 10-minute boundaries and partial refresh between minute changes
+- Renders a monochrome clock page with weekday, daypart, large 12-hour time, date, and the first image widget
+- Renders additional image pages from files in `images/`, two images per page
+- Uses the left and right front buttons to change pages, with wraparound
+- Uses full refresh on page changes and 10-minute boundaries
+- Uses partial refresh for minute changes while the clock page is visible
 
 ## IDF Setup
 
@@ -32,6 +34,19 @@ WIFI_SSID=your-ssid
 WIFI_PASSWORD=your-password
 ```
 
+## Images
+
+Image widgets live in `images/` as `*.xbm` files.
+
+- Each image is compiled into the firmware
+- The first image appears next to the clock
+- Remaining images appear on later pages, two per page
+- Image files should use a basename that is a valid C identifier, for example `page1.xbm`
+
+If you add, remove, or rename image files, run `idf.py reconfigure` before rebuilding.
+
+Use the left and right buttons to change the page. The reset button has no function yet.
+
 ## Build And Flash
 
 ```bash
@@ -41,7 +56,10 @@ idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-If you change `.env` after the first configure, run `idf.py reconfigure` to update `wifi_env.h` before rebuilding.
+Run `idf.py reconfigure` before rebuilding if you:
+
+- change `.env`
+- add, remove, or rename files in `images/`
 
 ## Font Assets
 

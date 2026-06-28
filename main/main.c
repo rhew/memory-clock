@@ -1,10 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 #include <time.h>
 
+#include "driver/gpio.h"
 #include "esp_check.h"
+#include "esp_timer.h"
 #include "esp_netif_sntp.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -19,9 +20,19 @@ static const char *TAG = "memory_clock";
 static uint8_t banner_buffer[BANNER_BUFFER_SIZE];
 
 enum {
+    BUTTON_RIGHT_GPIO = 4,
+    BUTTON_LEFT_GPIO = 5,
+    BUTTON_DEBOUNCE_MS = 250,
     FULL_REFRESH_MINUTE_INTERVAL = 10,
+    LOOP_POLL_MS = 100,
     SNTP_WAIT_MS = 15000,
 };
+
+typedef enum {
+    PAGE_NAV_NONE = 0,
+    PAGE_NAV_PREVIOUS = -1,
+    PAGE_NAV_NEXT = 1,
+} page_nav_t;
 
 static void timezone_init(void)
 {
@@ -50,7 +61,8 @@ static const char *clock_daypart(int hour)
     return "Night";
 }
 
-static void render_clock_frame(struct tm *tm_info, banner_clock_layout_t *layout)
+static void render_page_frame(size_t page_index, struct tm *tm_info,
+                              banner_clock_layout_t *layout)
 {
     char weekday[16];
     char month_text[16];
@@ -61,19 +73,46 @@ static void render_clock_frame(struct tm *tm_info, banner_clock_layout_t *layout
     strftime(month_text, sizeof(month_text), "%B", tm_info);
     snprintf(date_text, sizeof(date_text), "%s %d, %d", month_text, tm_info->tm_mday,
              tm_info->tm_year + 1900);
-    banner_render_clock(banner_buffer, sizeof(banner_buffer), weekday,
-                        clock_daypart(tm_info->tm_hour), hour12, tm_info->tm_min,
-                        tm_info->tm_hour >= 12, date_text, layout);
+    banner_render_page(banner_buffer, sizeof(banner_buffer), page_index, weekday,
+                       clock_daypart(tm_info->tm_hour), hour12, tm_info->tm_min,
+                       tm_info->tm_hour >= 12, date_text, layout);
 }
 
-static void sleep_until_next_minute(void)
+static esp_err_t buttons_init(void)
 {
-    time_t now = time(NULL);
-    int delay_seconds = 60 - (int)(now % 60);
-    if(delay_seconds <= 0 || delay_seconds > 60) {
-        delay_seconds = 60;
+    gpio_config_t config = {
+        .pin_bit_mask = (1ULL << BUTTON_LEFT_GPIO) | (1ULL << BUTTON_RIGHT_GPIO),
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    return gpio_config(&config);
+}
+
+static page_nav_t buttons_poll(void)
+{
+    static int last_left = 1;
+    static int last_right = 1;
+    static int64_t last_left_event_us;
+    static int64_t last_right_event_us;
+
+    int64_t now_us = esp_timer_get_time();
+    int left = gpio_get_level(BUTTON_LEFT_GPIO);
+    int right = gpio_get_level(BUTTON_RIGHT_GPIO);
+    page_nav_t nav = PAGE_NAV_NONE;
+
+    if(left == 0 && last_left != 0
+       && (now_us - last_left_event_us) / 1000 >= BUTTON_DEBOUNCE_MS) {
+        last_left_event_us = now_us;
+        nav = PAGE_NAV_PREVIOUS;
+    } else if(right == 0 && last_right != 0
+              && (now_us - last_right_event_us) / 1000 >= BUTTON_DEBOUNCE_MS) {
+        last_right_event_us = now_us;
+        nav = PAGE_NAV_NEXT;
     }
-    vTaskDelay(pdMS_TO_TICKS(delay_seconds * 1000));
+
+    last_left = left;
+    last_right = right;
+    return nav;
 }
 
 void app_main(void)
@@ -110,36 +149,62 @@ void app_main(void)
                                                       BANNER_WIDTH, BANNER_HEIGHT));
     ESP_ERROR_CHECK(clock_sync_time());
     ESP_LOGI(TAG, "time synchronized from %s", "time.cloudflare.com");
+    ESP_ERROR_CHECK(buttons_init());
 
     int last_minute = -1;
+    size_t page_count = banner_page_count();
+    size_t current_page = 0;
+    bool force_full_refresh = true;
     banner_clock_layout_t clock_layout = {0};
+    ESP_LOGI(TAG, "configured %u display page(s)", (unsigned)page_count);
     while(true) {
         time_t now = time(NULL);
         struct tm tm_info;
         localtime_r(&now, &tm_info);
-        if(tm_info.tm_min == last_minute) {
-            sleep_until_next_minute();
-            continue;
+
+        bool minute_changed = tm_info.tm_min != last_minute;
+        bool should_render = force_full_refresh || (current_page == 0 && minute_changed);
+        if(should_render) {
+            render_page_frame(current_page, &tm_info, &clock_layout);
+            if(force_full_refresh || current_page != 0 || last_minute < 0
+               || (tm_info.tm_min % FULL_REFRESH_MINUTE_INTERVAL) == 0) {
+                ESP_ERROR_CHECK(display_port_show_monochrome_full(banner_buffer,
+                                                                  sizeof(banner_buffer),
+                                                                  BANNER_WIDTH, BANNER_HEIGHT));
+            } else {
+                ESP_ERROR_CHECK(display_port_show_monochrome_partial(banner_buffer,
+                                                                     sizeof(banner_buffer),
+                                                                     BANNER_WIDTH, BANNER_HEIGHT,
+                                                                     clock_layout.minute_x,
+                                                                     clock_layout.minute_y,
+                                                                     clock_layout.minute_width,
+                                                                     clock_layout.minute_height));
+            }
+            force_full_refresh = false;
+            if(current_page == 0) {
+                last_minute = tm_info.tm_min;
+            }
+
+            char timestamp[32];
+            strftime(timestamp, sizeof(timestamp), "%I:%M %p", &tm_info);
+            ESP_LOGI(TAG, "displayed page %u/%u at %s",
+                     (unsigned)(current_page + 1), (unsigned)page_count, timestamp);
         }
 
-        render_clock_frame(&tm_info, &clock_layout);
-        if(last_minute < 0 || (tm_info.tm_min % FULL_REFRESH_MINUTE_INTERVAL) == 0) {
-            ESP_ERROR_CHECK(display_port_show_monochrome_full(banner_buffer, sizeof(banner_buffer),
-                                                              BANNER_WIDTH, BANNER_HEIGHT));
+        page_nav_t nav = buttons_poll();
+        if(nav != PAGE_NAV_NONE && page_count > 1) {
+            if(nav == PAGE_NAV_NEXT) {
+                current_page = (current_page + 1) % page_count;
+            } else {
+                current_page = (current_page + page_count - 1) % page_count;
+            }
+            force_full_refresh = true;
+            ESP_LOGI(TAG, "page button selected page %u/%u",
+                     (unsigned)(current_page + 1), (unsigned)page_count);
+        } else if(nav != PAGE_NAV_NONE) {
+            ESP_LOGI(TAG, "page button ignored because only one page is configured");
         } else {
-            ESP_ERROR_CHECK(display_port_show_monochrome_partial(banner_buffer,
-                                                                 sizeof(banner_buffer),
-                                                                 BANNER_WIDTH, BANNER_HEIGHT,
-                                                                 clock_layout.minute_x,
-                                                                 clock_layout.minute_y,
-                                                                 clock_layout.minute_width,
-                                                                 clock_layout.minute_height));
+            vTaskDelay(pdMS_TO_TICKS(LOOP_POLL_MS));
         }
-
-        char timestamp[32];
-        strftime(timestamp, sizeof(timestamp), "%I:%M %p", &tm_info);
-        ESP_LOGI(TAG, "displayed time %s", timestamp);
-        last_minute = tm_info.tm_min;
-        sleep_until_next_minute();
     }
 }

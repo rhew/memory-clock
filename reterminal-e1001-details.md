@@ -37,17 +37,19 @@ The firmware talks directly to the E1001 panel and its wiring.
 
 ## Buttons
 
-The E1001 has three front buttons. Seeed names the signals `KEY0`, `KEY1`, and `KEY2`. This project only needs the physical mapping:
+The E1001 has three front buttons. Seeed names the signals `KEY0`, `KEY1`, and `KEY2`.
 
-- Right button: `GPIO3`
-- Top button: `GPIO4`
-- Left button: `GPIO5`
+The vendor cookbook clearly documents the GPIOs:
 
-Seeed's stock firmware assigns these roles:
+- `KEY0 = GPIO3`
+- `KEY1 = GPIO4`
+- `KEY2 = GPIO5`
 
-- Left button: `previous page`
-- Right button: `next page`
-- Top button: `refresh / wake`
+The physical left/right/top mapping in the vendor material is not clear enough to trust by itself. On the unit used for this firmware, observed behavior is:
+
+- Left page button: `GPIO5`
+- Right page button: `GPIO4`
+- Top button: `GPIO3`
 
 Other button facts that matter:
 
@@ -58,7 +60,7 @@ Other button facts that matter:
 For this project:
 
 - use left and right for page navigation
-- reserve the top button for refresh, wake, or another non-page action
+- leave the top button unused for now
 
 ## Wi-Fi
 
