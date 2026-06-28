@@ -43,10 +43,22 @@ set(MEMORY_CLOCK_IMAGE_ENTRIES "")
 foreach(MEMORY_CLOCK_IMAGE_FILE IN LISTS MEMORY_CLOCK_IMAGE_FILES)
     get_filename_component(MEMORY_CLOCK_IMAGE_NAME "${MEMORY_CLOCK_IMAGE_FILE}" NAME_WE)
     get_filename_component(MEMORY_CLOCK_IMAGE_FILENAME "${MEMORY_CLOCK_IMAGE_FILE}" NAME)
+    set(MEMORY_CLOCK_IMAGE_GENERATED_FILE
+        "${MEMORY_CLOCK_GENERATED_DIR}/${MEMORY_CLOCK_IMAGE_FILENAME}")
     if(NOT MEMORY_CLOCK_IMAGE_NAME MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
         message(FATAL_ERROR
             "Image filename '${MEMORY_CLOCK_IMAGE_NAME}' must be a valid C identifier")
     endif()
+
+    file(READ "${MEMORY_CLOCK_IMAGE_FILE}" MEMORY_CLOCK_IMAGE_CONTENTS)
+    string(REGEX REPLACE "static[ \t]+unsigned[ \t]+char[ \t]+"
+           "static const uint8_t "
+           MEMORY_CLOCK_IMAGE_CONTENTS "${MEMORY_CLOCK_IMAGE_CONTENTS}")
+    string(REGEX REPLACE "static[ \t]+char[ \t]+"
+           "static const uint8_t "
+           MEMORY_CLOCK_IMAGE_CONTENTS "${MEMORY_CLOCK_IMAGE_CONTENTS}")
+    file(WRITE "${MEMORY_CLOCK_IMAGE_GENERATED_FILE}" "${MEMORY_CLOCK_IMAGE_CONTENTS}")
+
     string(APPEND MEMORY_CLOCK_IMAGE_INCLUDES
            "#include \"${MEMORY_CLOCK_IMAGE_FILENAME}\"\n")
     string(APPEND MEMORY_CLOCK_IMAGE_ENTRIES
@@ -93,6 +105,5 @@ idf_component_register(
         "main.c"
         "provisioning.c"
     INCLUDE_DIRS "." "${MEMORY_CLOCK_GENERATED_DIR}"
-                 "${CMAKE_CURRENT_LIST_DIR}/../images"
     REQUIRES driver esp_netif esp_timer esp_wifi lwip nvs_flash
 )

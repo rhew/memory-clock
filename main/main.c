@@ -5,7 +5,6 @@
 
 #include "driver/gpio.h"
 #include "esp_check.h"
-#include "esp_timer.h"
 #include "esp_netif_sntp.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -20,9 +19,10 @@ static const char *TAG = "memory_clock";
 static uint8_t banner_buffer[BANNER_BUFFER_SIZE];
 
 enum {
+    BUTTON_HOME_GPIO = 3,
     BUTTON_RIGHT_GPIO = 4,
     BUTTON_LEFT_GPIO = 5,
-    BUTTON_DEBOUNCE_MS = 250,
+    BUTTON_DEBOUNCE_MS = 80,
     FULL_REFRESH_MINUTE_INTERVAL = 10,
     LOOP_POLL_MS = 100,
     SNTP_WAIT_MS = 15000,
@@ -33,6 +33,15 @@ typedef enum {
     PAGE_NAV_PREVIOUS = -1,
     PAGE_NAV_NEXT = 1,
 } page_nav_t;
+
+static portMUX_TYPE button_lock = portMUX_INITIALIZER_UNLOCKED;
+static volatile int pending_page_delta;
+static volatile bool pending_home_page;
+static volatile TickType_t last_home_tick;
+static volatile TickType_t last_left_tick;
+static volatile TickType_t last_right_tick;
+
+static void button_isr_handler(void *arg);
 
 static void timezone_init(void)
 {
@@ -81,38 +90,109 @@ static void render_page_frame(size_t page_index, struct tm *tm_info,
 static esp_err_t buttons_init(void)
 {
     gpio_config_t config = {
-        .pin_bit_mask = (1ULL << BUTTON_LEFT_GPIO) | (1ULL << BUTTON_RIGHT_GPIO),
+        .pin_bit_mask = (1ULL << BUTTON_HOME_GPIO) | (1ULL << BUTTON_LEFT_GPIO)
+                        | (1ULL << BUTTON_RIGHT_GPIO),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
+        .intr_type = GPIO_INTR_NEGEDGE,
     };
-    return gpio_config(&config);
-}
+    ESP_RETURN_ON_ERROR(gpio_config(&config), TAG, "button gpio config");
 
-static page_nav_t buttons_poll(void)
-{
-    static int last_left = 1;
-    static int last_right = 1;
-    static int64_t last_left_event_us;
-    static int64_t last_right_event_us;
-
-    int64_t now_us = esp_timer_get_time();
-    int left = gpio_get_level(BUTTON_LEFT_GPIO);
-    int right = gpio_get_level(BUTTON_RIGHT_GPIO);
-    page_nav_t nav = PAGE_NAV_NONE;
-
-    if(left == 0 && last_left != 0
-       && (now_us - last_left_event_us) / 1000 >= BUTTON_DEBOUNCE_MS) {
-        last_left_event_us = now_us;
-        nav = PAGE_NAV_PREVIOUS;
-    } else if(right == 0 && last_right != 0
-              && (now_us - last_right_event_us) / 1000 >= BUTTON_DEBOUNCE_MS) {
-        last_right_event_us = now_us;
-        nav = PAGE_NAV_NEXT;
+    esp_err_t err = gpio_install_isr_service(0);
+    if(err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return err;
     }
 
-    last_left = left;
-    last_right = right;
-    return nav;
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_LEFT_GPIO, button_isr_handler,
+                                             (void *)(intptr_t)PAGE_NAV_PREVIOUS),
+                        TAG, "left button handler");
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_RIGHT_GPIO, button_isr_handler,
+                                             (void *)(intptr_t)PAGE_NAV_NEXT),
+                        TAG, "right button handler");
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_HOME_GPIO, button_isr_handler, NULL),
+                        TAG, "home button handler");
+    return ESP_OK;
+}
+
+static void button_isr_handler(void *arg)
+{
+    if(arg == NULL) {
+        TickType_t now = xTaskGetTickCountFromISR();
+        TickType_t debounce_ticks = pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS);
+        if(now - last_home_tick >= debounce_ticks) {
+            last_home_tick = now;
+            portENTER_CRITICAL_ISR(&button_lock);
+            pending_home_page = true;
+            portEXIT_CRITICAL_ISR(&button_lock);
+        }
+        return;
+    }
+
+    page_nav_t nav = (page_nav_t)(intptr_t)arg;
+    TickType_t now = xTaskGetTickCountFromISR();
+    TickType_t debounce_ticks = pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS);
+    volatile TickType_t *last_tick = nav == PAGE_NAV_PREVIOUS ? &last_left_tick : &last_right_tick;
+
+    if(now - *last_tick >= debounce_ticks) {
+        *last_tick = now;
+        portENTER_CRITICAL_ISR(&button_lock);
+        pending_page_delta += (int)nav;
+        portEXIT_CRITICAL_ISR(&button_lock);
+    }
+}
+
+static int buttons_take_pending_delta(void)
+{
+    portENTER_CRITICAL(&button_lock);
+    int delta = pending_page_delta;
+    pending_page_delta = 0;
+    portEXIT_CRITICAL(&button_lock);
+    return delta;
+}
+
+static bool buttons_take_pending_home(void)
+{
+    portENTER_CRITICAL(&button_lock);
+    bool home = pending_home_page;
+    pending_home_page = false;
+    portEXIT_CRITICAL(&button_lock);
+    return home;
+}
+
+static size_t page_advance(size_t page, size_t page_count, int delta)
+{
+    if(page_count <= 1 || delta == 0) return page;
+
+    int wrapped_delta = delta % (int)page_count;
+    if(wrapped_delta < 0) wrapped_delta += (int)page_count;
+    return (page + (size_t)wrapped_delta) % page_count;
+}
+
+static bool apply_pending_navigation(size_t *current_page, size_t page_count)
+{
+    if(buttons_take_pending_home()) {
+        *current_page = 0;
+        ESP_LOGI(TAG, "home button selected page 1/%u", (unsigned)page_count);
+        return true;
+    }
+
+    int delta = buttons_take_pending_delta();
+    if(delta == 0) return false;
+    if(page_count <= 1) {
+        ESP_LOGI(TAG, "page buttons ignored because only one page is configured");
+        return false;
+    }
+
+    size_t next_page = page_advance(*current_page, page_count, delta);
+    if(next_page == *current_page) {
+        ESP_LOGI(TAG, "page buttons netted no page change");
+        return false;
+    }
+
+    *current_page = next_page;
+    ESP_LOGI(TAG, "page buttons selected page %u/%u",
+             (unsigned)(*current_page + 1), (unsigned)page_count);
+    return true;
 }
 
 void app_main(void)
@@ -158,6 +238,10 @@ void app_main(void)
     banner_clock_layout_t clock_layout = {0};
     ESP_LOGI(TAG, "configured %u display page(s)", (unsigned)page_count);
     while(true) {
+        if(apply_pending_navigation(&current_page, page_count)) {
+            force_full_refresh = true;
+        }
+
         time_t now = time(NULL);
         struct tm tm_info;
         localtime_r(&now, &tm_info);
@@ -191,18 +275,9 @@ void app_main(void)
                      (unsigned)(current_page + 1), (unsigned)page_count, timestamp);
         }
 
-        page_nav_t nav = buttons_poll();
-        if(nav != PAGE_NAV_NONE && page_count > 1) {
-            if(nav == PAGE_NAV_NEXT) {
-                current_page = (current_page + 1) % page_count;
-            } else {
-                current_page = (current_page + page_count - 1) % page_count;
-            }
+        if(apply_pending_navigation(&current_page, page_count)) {
             force_full_refresh = true;
-            ESP_LOGI(TAG, "page button selected page %u/%u",
-                     (unsigned)(current_page + 1), (unsigned)page_count);
-        } else if(nav != PAGE_NAV_NONE) {
-            ESP_LOGI(TAG, "page button ignored because only one page is configured");
+            continue;
         } else {
             vTaskDelay(pdMS_TO_TICKS(LOOP_POLL_MS));
         }
