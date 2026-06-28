@@ -19,10 +19,6 @@ static const char *TAG = "memory_clock";
 static uint8_t banner_buffer[BANNER_BUFFER_SIZE];
 
 enum {
-    TIME_REGION_X = 40,
-    TIME_REGION_Y = 140,
-    TIME_REGION_WIDTH = 720,
-    TIME_REGION_HEIGHT = 220,
     FULL_REFRESH_MINUTE_INTERVAL = 10,
     SNTP_WAIT_MS = 15000,
 };
@@ -54,7 +50,7 @@ static const char *clock_daypart(int hour)
     return "Night";
 }
 
-static void render_clock_frame(struct tm *tm_info)
+static void render_clock_frame(struct tm *tm_info, banner_clock_layout_t *layout)
 {
     char weekday[16];
     char month_text[16];
@@ -67,7 +63,7 @@ static void render_clock_frame(struct tm *tm_info)
              tm_info->tm_year + 1900);
     banner_render_clock(banner_buffer, sizeof(banner_buffer), weekday,
                         clock_daypart(tm_info->tm_hour), hour12, tm_info->tm_min,
-                        tm_info->tm_hour >= 12, date_text);
+                        tm_info->tm_hour >= 12, date_text, layout);
 }
 
 static void sleep_until_next_minute(void)
@@ -116,6 +112,7 @@ void app_main(void)
     ESP_LOGI(TAG, "time synchronized from %s", "time.cloudflare.com");
 
     int last_minute = -1;
+    banner_clock_layout_t clock_layout = {0};
     while(true) {
         time_t now = time(NULL);
         struct tm tm_info;
@@ -125,7 +122,7 @@ void app_main(void)
             continue;
         }
 
-        render_clock_frame(&tm_info);
+        render_clock_frame(&tm_info, &clock_layout);
         if(last_minute < 0 || (tm_info.tm_min % FULL_REFRESH_MINUTE_INTERVAL) == 0) {
             ESP_ERROR_CHECK(display_port_show_monochrome_full(banner_buffer, sizeof(banner_buffer),
                                                               BANNER_WIDTH, BANNER_HEIGHT));
@@ -133,9 +130,10 @@ void app_main(void)
             ESP_ERROR_CHECK(display_port_show_monochrome_partial(banner_buffer,
                                                                  sizeof(banner_buffer),
                                                                  BANNER_WIDTH, BANNER_HEIGHT,
-                                                                 TIME_REGION_X, TIME_REGION_Y,
-                                                                 TIME_REGION_WIDTH,
-                                                                 TIME_REGION_HEIGHT));
+                                                                 clock_layout.minute_x,
+                                                                 clock_layout.minute_y,
+                                                                 clock_layout.minute_width,
+                                                                 clock_layout.minute_height));
         }
 
         char timestamp[32];

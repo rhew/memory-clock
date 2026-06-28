@@ -8,8 +8,15 @@
 #define BANNER_HEIGHT 480
 #define BANNER_BUFFER_SIZE ((BANNER_WIDTH * BANNER_HEIGHT) / 8)
 
+typedef struct {
+    int minute_x;
+    int minute_y;
+    int minute_width;
+    int minute_height;
+} banner_clock_layout_t;
+
 void banner_render_status(uint8_t *buffer, size_t buffer_size, const char *headline,
                           const char *detail);
 void banner_render_clock(uint8_t *buffer, size_t buffer_size, const char *weekday,
                          const char *daypart, int hour12, int minute, bool is_pm,
-                         const char *date_text);
+                         const char *date_text, banner_clock_layout_t *layout);

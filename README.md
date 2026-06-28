@@ -4,19 +4,12 @@ ESP-IDF firmware for the Seeed Studio reTerminal E1001 (`800x480`, ESP32-S3).
 
 Current firmware behavior:
 
-- Connects to Wi-Fi using `.env`
+- Connects to Wi-Fi using ssid and password in `.env`
 - Syncs time from `time.cloudflare.com`
-- Uses New York eastern time
+- Uses New York Eastern time
 - Renders a monochrome memory-clock layout:
   weekday, daypart, large 12-hour time, and long-form date
 - Uses full refresh on 10-minute boundaries and partial refresh between minute changes
-
-## Repo Shape
-
-- The repo root is the ESP-IDF project
-- Display code is in `main/display_port.c`
-- Screen rendering is in `main/banner.c`
-- Wi-Fi and SNTP startup is in `main/main.c` and `main/provisioning.c`
 
 ## IDF Setup
 
@@ -32,19 +25,36 @@ Verify the board:
 esptool.py --chip esp32s3 -p /dev/ttyUSB0 chip_id
 ```
 
+Create `.env` in the repo root:
+
+```dotenv
+WIFI_SSID=your-ssid
+WIFI_PASSWORD=your-password
+```
+
 ## Build And Flash
 
 ```bash
 idf.py set-target esp32s3
-edit .env
 idf.py reconfigure
 idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
 
-If you change `.env` after the first configure, run `idf.py reconfigure` once before rebuilding so the generated `wifi_env.h` is refreshed.
+If you change `.env` after the first configure, run `idf.py reconfigure` to update `wifi_env.h` before rebuilding.
 
-## Checked-In Config
+## Font Assets
 
-- `sdkconfig` is checked in because it is the known-good ESP-IDF config for the current E1001 firmware.
-- `sdkconfig.defaults` is checked in because it seeds the build with the board's 32 MB flash size before `sdkconfig` exists.
+Font files:
+- `main/font_assets.c`
+- `main/font_assets.h`
+
+You can regenerate fonts before building if you want to change the typeface or sizes.
+
+Example:
+
+```bash
+cc tools/generate_fonts.c $(pkg-config --cflags --libs freetype2) -O2 -o /tmp/memory-clock-fontgen
+/tmp/memory-clock-fontgen /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf main/font_assets.c main/font_assets.h
+idf.py build
+```

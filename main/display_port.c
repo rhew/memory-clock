@@ -28,6 +28,7 @@ enum {
 static spi_device_handle_t display_spi;
 static uint8_t previous_frame[E1001_WIDTH * E1001_HEIGHT / 8];
 static bool have_previous_frame;
+static bool panel_awake;
 
 static const uint8_t cmd_user[] = {0x17, 0x3f, 0x3f, 0x09, 0x06, 0x16};
 static const uint8_t lut_vcom[42] = {
@@ -130,7 +131,9 @@ static esp_err_t reset_panel(void)
     delay_ms(10);
     gpio_set_level(E1001_PIN_RST, 1);
     delay_ms(10);
-    return wait_ready(E1001_REFRESH_TIMEOUT_MS);
+    esp_err_t err = wait_ready(E1001_REFRESH_TIMEOUT_MS);
+    if(err == ESP_OK) panel_awake = false;
+    return err;
 }
 
 static esp_err_t init_panel(void)
@@ -183,11 +186,11 @@ static esp_err_t set_full_window(void)
     ESP_RETURN_ON_ERROR(write_data_byte(0x00), TAG, "x start");
     ESP_RETURN_ON_ERROR(write_data_byte(0x00), TAG, "x start");
     ESP_RETURN_ON_ERROR(write_data_byte((E1001_WIDTH - 1) >> 8), TAG, "x end");
-    ESP_RETURN_ON_ERROR(write_data_byte(((E1001_WIDTH - 1) & 0xff) - 1), TAG, "x end");
+    ESP_RETURN_ON_ERROR(write_data_byte((E1001_WIDTH - 1) & 0xff), TAG, "x end");
     ESP_RETURN_ON_ERROR(write_data_byte(0x00), TAG, "y start");
     ESP_RETURN_ON_ERROR(write_data_byte(0x00), TAG, "y start");
     ESP_RETURN_ON_ERROR(write_data_byte((E1001_HEIGHT - 1) >> 8), TAG, "y end");
-    ESP_RETURN_ON_ERROR(write_data_byte(((E1001_HEIGHT - 1) & 0xff) - 1), TAG, "y end");
+    ESP_RETURN_ON_ERROR(write_data_byte((E1001_HEIGHT - 1) & 0xff), TAG, "y end");
     ESP_RETURN_ON_ERROR(write_data_byte(0x01), TAG, "scan");
     return ESP_OK;
 }
@@ -210,11 +213,11 @@ static esp_err_t set_partial_window(int x, int y, int width, int height)
     ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)(x_start >> 8)), TAG, "x start");
     ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)(x_start & 0xff)), TAG, "x start");
     ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)((x_end - 1) >> 8)), TAG, "x end");
-    ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)(((x_end - 1) & 0xff) - 1)), TAG, "x end");
+    ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)((x_end - 1) & 0xff)), TAG, "x end");
     ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)(y >> 8)), TAG, "y start");
     ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)(y & 0xff)), TAG, "y start");
     ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)((y_end - 1) >> 8)), TAG, "y end");
-    ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)(((y_end - 1) & 0xff) - 1)), TAG, "y end");
+    ESP_RETURN_ON_ERROR(write_data_byte((uint8_t)((y_end - 1) & 0xff)), TAG, "y end");
     ESP_RETURN_ON_ERROR(write_data_byte(0x01), TAG, "scan");
     return ESP_OK;
 }
@@ -234,6 +237,17 @@ static esp_err_t sleep_panel(void)
     ESP_RETURN_ON_ERROR(wait_ready(E1001_REFRESH_TIMEOUT_MS), TAG, "power off busy");
     ESP_RETURN_ON_ERROR(write_command(0x07), TAG, "deep sleep");
     ESP_RETURN_ON_ERROR(write_data_byte(0xa5), TAG, "deep sleep");
+    panel_awake = false;
+    return ESP_OK;
+}
+
+static esp_err_t ensure_panel_awake(void)
+{
+    if(panel_awake) return ESP_OK;
+
+    ESP_RETURN_ON_ERROR(reset_panel(), TAG, "panel reset");
+    ESP_RETURN_ON_ERROR(init_panel(), TAG, "panel init");
+    panel_awake = true;
     return ESP_OK;
 }
 
@@ -289,6 +303,7 @@ static bool find_changed_region(const uint8_t *old_frame, const uint8_t *new_fra
     return true;
 }
 
+
 esp_err_t display_port_init(void)
 {
     if(display_spi != NULL) return ESP_OK;
@@ -343,8 +358,7 @@ esp_err_t display_port_show_monochrome_full(const uint8_t *buffer, size_t buffer
     ESP_LOGI(TAG, "refreshing E1001 UC8179 display with %dx%d monochrome frame",
              width, height);
 
-    ESP_RETURN_ON_ERROR(reset_panel(), TAG, "panel reset");
-    ESP_RETURN_ON_ERROR(init_panel(), TAG, "panel init");
+    ESP_RETURN_ON_ERROR(ensure_panel_awake(), TAG, "panel wake");
     ESP_RETURN_ON_ERROR(set_full_window(), TAG, "set full window");
 
     ESP_RETURN_ON_ERROR(write_command(0x10), TAG, "old frame");
@@ -384,53 +398,56 @@ esp_err_t display_port_show_monochrome_partial(const uint8_t *buffer, size_t buf
         return ESP_OK;
     }
 
+    esp_err_t err = display_port_init();
+    if(err != ESP_OK) {
+        return err;
+    }
     int x_start = changed_x & ~7;
     int x_end = (changed_x + changed_width + 7) & ~7;
     int region_bytes_per_row = (x_end - x_start) / 8;
     int total_region_bytes = region_bytes_per_row * changed_height;
-    uint8_t *old_region = malloc(total_region_bytes);
     uint8_t *new_region = malloc(total_region_bytes);
-    if(old_region == NULL || new_region == NULL) {
-        free(old_region);
-        free(new_region);
+    if(new_region == NULL) {
         return ESP_ERR_NO_MEM;
     }
-
-    copy_region(old_region, previous_frame, changed_x, changed_y, changed_width, changed_height);
     copy_region(new_region, buffer, changed_x, changed_y, changed_width, changed_height);
 
-    esp_err_t err = display_port_init();
-    if(err != ESP_OK) goto cleanup;
     ESP_LOGI(TAG, "partial refresh E1001 UC8179 region x=%d y=%d w=%d h=%d",
              x_start, changed_y, x_end - x_start, changed_height);
 
-    err = reset_panel();
-    if(err != ESP_OK) goto cleanup;
-    err = init_panel();
-    if(err != ESP_OK) goto cleanup;
-    err = set_partial_window(changed_x, changed_y, changed_width, changed_height);
-    if(err != ESP_OK) goto cleanup;
-
-    err = write_command(0x10);
-    if(err != ESP_OK) goto cleanup;
-    err = write_data(old_region, total_region_bytes);
-    if(err != ESP_OK) goto cleanup;
-
-    err = write_command(0x13);
-    if(err != ESP_OK) goto cleanup;
-    err = write_data(new_region, total_region_bytes);
-    if(err != ESP_OK) goto cleanup;
-
-    err = refresh_panel();
-    if(err != ESP_OK) goto cleanup;
-    err = sleep_panel();
-    if(err == ESP_OK) {
-        memcpy(previous_frame, buffer, E1001_WIDTH * E1001_HEIGHT / 8);
-        have_previous_frame = true;
+    err = ensure_panel_awake();
+    if(err != ESP_OK) {
+        free(new_region);
+        return err;
     }
 
-cleanup:
-    free(old_region);
+    err = set_partial_window(changed_x, changed_y, changed_width, changed_height);
+    if(err != ESP_OK) {
+        free(new_region);
+        return err;
+    }
+
+    err = write_command(0x13);
+    if(err != ESP_OK) {
+        free(new_region);
+        return err;
+    }
+    err = write_data(new_region, total_region_bytes);
     free(new_region);
-    return err;
+    if(err != ESP_OK) {
+        return err;
+    }
+
+    err = refresh_panel();
+    if(err != ESP_OK) {
+        return err;
+    }
+    err = write_command(0x92);
+    if(err != ESP_OK) {
+        return err;
+    }
+
+    memcpy(previous_frame, buffer, E1001_WIDTH * E1001_HEIGHT / 8);
+    have_previous_frame = true;
+    return ESP_OK;
 }

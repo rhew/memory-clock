@@ -38,6 +38,8 @@ idf_component_register(
     SRCS
         "banner.c"
         "display_port.c"
+        "font_assets.c"
+        "font_render.c"
         "main.c"
         "provisioning.c"
     INCLUDE_DIRS "." "${MEMORY_CLOCK_GENERATED_DIR}"
