@@ -180,7 +180,8 @@ esp_err_t provisioning_start(char *ip_out, size_t ip_out_size)
     strlcpy((char *)sta_config.sta.ssid, MEMORY_CLOCK_WIFI_SSID, sizeof(sta_config.sta.ssid));
     strlcpy((char *)sta_config.sta.password, MEMORY_CLOCK_WIFI_PASSWORD,
             sizeof(sta_config.sta.password));
-    sta_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    sta_config.sta.threshold.authmode =
+        MEMORY_CLOCK_WIFI_PASSWORD[0] == '\0' ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
     sta_config.sta.pmf_cfg.capable = true;
     sta_config.sta.pmf_cfg.required = false;
     sta_config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
