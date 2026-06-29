@@ -465,7 +465,8 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(bits)
 
     def log_message(self, fmt: str, *args) -> None:
-        print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), fmt % args))
+        print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), fmt % args),
+              flush=True)
 
 
 class ClockServer(ThreadingHTTPServer):
@@ -502,9 +503,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     server = ClockServer((args.host, args.port), args.calendar.resolve(), args.devices.resolve())
-    print(f"Serving {BASE_PATH} on http://{args.host}:{args.port}{BASE_PATH}")
-    print(f"Calendar: {server.calendar_path}")
-    print(f"Devices: {server.devices_path}")
+    print(f"Serving {BASE_PATH} on http://{args.host}:{args.port}{BASE_PATH}", flush=True)
+    print(f"Calendar: {server.calendar_path}", flush=True)
+    print(f"Devices: {server.devices_path}", flush=True)
     server.serve_forever()
     return 0
 
