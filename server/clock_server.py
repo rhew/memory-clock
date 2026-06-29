@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import threading
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 from email.utils import formatdate, parsedate_to_datetime
@@ -178,18 +179,17 @@ def start_of_today_timestamp() -> int:
     return int(start_of_today.astimezone(timezone.utc).timestamp())
 
 
-def path_mtime(path: Path) -> int:
+def path_fingerprint(path: Path) -> str:
     if not path.exists():
-        return 0
-    return int(path.stat().st_mtime)
+        return "missing"
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return "unreadable"
 
 
-def effective_last_modified(calendar_path: Path, server_started_at: int) -> int:
-    return max(
-        path_mtime(calendar_path),
-        start_of_today_timestamp(),
-        server_started_at,
-    )
+def effective_last_modified(calendar_changed_at: int) -> int:
+    return max(calendar_changed_at, start_of_today_timestamp())
 
 
 def wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont,
@@ -427,8 +427,7 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         if device_description is None:
             return
 
-        last_modified = effective_last_modified(self.app.calendar_path,
-                                                self.app.server_started_at)
+        last_modified = self.app.effective_last_modified()
         if_modified_since = httpdate_to_timestamp(self.headers.get("If-Modified-Since", ""))
         if if_modified_since is not None and last_modified <= if_modified_since:
             self.send_response(HTTPStatus.NOT_MODIFIED)
@@ -457,8 +456,7 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "image not found")
             return
 
-        last_modified = effective_last_modified(self.app.calendar_path,
-                                                self.app.server_started_at)
+        last_modified = self.app.effective_last_modified()
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(bits)))
@@ -476,7 +474,18 @@ class ClockServer(ThreadingHTTPServer):
         super().__init__(server_address, ClockRequestHandler)
         self.calendar_path = calendar_path
         self.devices_path = devices_path
-        self.server_started_at = int(datetime.now(timezone.utc).timestamp())
+        self.calendar_lock = threading.Lock()
+        self.calendar_fingerprint = path_fingerprint(calendar_path)
+        self.calendar_changed_at = int(datetime.now(timezone.utc).timestamp())
+
+    def effective_last_modified(self) -> int:
+        with self.calendar_lock:
+            fingerprint = path_fingerprint(self.calendar_path)
+            if fingerprint != self.calendar_fingerprint:
+                self.calendar_fingerprint = fingerprint
+                now = int(datetime.now(timezone.utc).timestamp())
+                self.calendar_changed_at = max(now, self.calendar_changed_at + 1)
+            return effective_last_modified(self.calendar_changed_at)
 
 
 def parse_args() -> argparse.Namespace:

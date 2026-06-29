@@ -56,5 +56,5 @@ idf_component_register(
         "main.c"
         "provisioning.c"
     INCLUDE_DIRS "." "${MEMORY_CLOCK_GENERATED_DIR}"
-    REQUIRES driver esp_http_client esp_netif esp_timer esp_wifi json lwip nvs_flash
+    REQUIRES driver esp_http_client esp_netif esp_timer esp_wifi json lwip mbedtls nvs_flash
 )

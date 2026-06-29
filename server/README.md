@@ -53,6 +53,10 @@ The image installs the Python packages and fonts needed for rendering. It expect
 
 It listens on port `8000` inside the container.
 
+Mount the data directory, not individual files. Many editors save by renaming a
+temporary file over the original; Docker file bind mounts can keep pointing at
+the old inode.
+
 ## Server Deployment
 
 The server handles `GET /memory-clock` and per-image paths under `/memory-clock/images/`.
@@ -65,8 +69,7 @@ Example `compose.yml` service:
       context: ../memory-clock/server
     container_name: memory-clock
     volumes:
-      - ./memory-clock-data/calendar.yaml:/data/calendar.yaml:ro
-      - ./memory-clock-data/devices.jsonl:/data/devices.jsonl:ro
+      - ./memory-clock-data:/data:ro
     networks:
       - reverse_proxy
     restart: unless-stopped
@@ -77,4 +80,3 @@ Example Caddy route:
 ```caddyfile
 reverse_proxy /memory-clock* memory-clock:8000
 ```
-

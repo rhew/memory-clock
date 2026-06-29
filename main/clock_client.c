@@ -6,6 +6,7 @@
 
 #include "cJSON.h"
 #include "esp_check.h"
+#include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -194,6 +195,7 @@ static esp_err_t fetch_image_bits(const char *url, int width, int height,
     esp_http_client_config_t config = {
         .url = url,
         .timeout_ms = HTTP_TIMEOUT_MS,
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if(client == NULL) {
@@ -342,6 +344,7 @@ clock_client_result_t clock_client_poll(void)
         .timeout_ms = HTTP_TIMEOUT_MS,
         .event_handler = http_event_handler,
         .user_data = &response,
+        .crt_bundle_attach = esp_crt_bundle_attach,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
