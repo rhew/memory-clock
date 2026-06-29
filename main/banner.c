@@ -6,7 +6,7 @@
 
 #include "font_assets.h"
 #include "font_render.h"
-#include "image_assets.h"
+#include "image_store.h"
 #include "logo_bits.xbm"
 
 enum {
@@ -26,7 +26,7 @@ enum {
     CLOCK_TIME_RIGHT_GUTTER = 28,
     CLOCK_TIME_X = CLOCK_TIME_LEFT_GUTTER,
     CLOCK_TIME_WIDTH = WIDGET_WIDTH - CLOCK_TIME_LEFT_GUTTER - CLOCK_TIME_RIGHT_GUTTER,
-    CLOCK_TIME_SHIFT_X = -6,
+    CLOCK_TIME_SHIFT_X = -2,
     STATUS_LOGO_X = 352,
     STATUS_LOGO_Y = 64,
     STATUS_TITLE_Y = 184,
@@ -158,11 +158,26 @@ static void draw_image_fit(uint8_t *buffer, int widget_x, int widget_y,
 
 static void draw_image_widget(uint8_t *buffer, int widget_x, size_t image_index)
 {
-    if(image_index >= memory_clock_image_count) return;
+    const memory_clock_image_t *image = image_store_get(image_index);
+    if(image == NULL) return;
 
-    const memory_clock_image_t *image = &memory_clock_images[image_index];
     draw_image_fit(buffer, widget_x, 0, WIDGET_WIDTH, WIDGET_HEIGHT,
                    image->bits, image->width, image->height);
+}
+
+static void draw_no_appointments_widget(uint8_t *buffer, int widget_x)
+{
+    draw_text_centered_in_rect(buffer, &memory_clock_font_ui_small, widget_x + 28,
+                               WIDGET_WIDTH - 56, 226, "No Appointments");
+}
+
+static void draw_server_unavailable_widget(uint8_t *buffer, int widget_x)
+{
+    draw_logo(buffer, widget_x + (WIDGET_WIDTH - logo_bits_width) / 2, 96);
+    draw_text_centered_in_rect(buffer, &memory_clock_font_ui_small, widget_x + 28,
+                               WIDGET_WIDTH - 56, 250, "couldn't connect");
+    draw_text_centered_in_rect(buffer, &memory_clock_font_ui_small, widget_x + 28,
+                               WIDGET_WIDTH - 56, 304, "to server");
 }
 
 static void draw_clock_widget(uint8_t *buffer, const char *weekday,
@@ -230,8 +245,9 @@ void banner_render_status(uint8_t *buffer, size_t buffer_size, const char *headl
 
 size_t banner_page_count(void)
 {
-    if(memory_clock_image_count == 0) return 1;
-    return 1 + (memory_clock_image_count / 2);
+    size_t image_count = image_store_count();
+    if(image_count == 0) return 1;
+    return 1 + (image_count / 2);
 }
 
 void banner_render_page(uint8_t *buffer, size_t buffer_size, size_t page_index,
@@ -248,7 +264,14 @@ void banner_render_page(uint8_t *buffer, size_t buffer_size, size_t page_index,
 
     if(page_index == 0) {
         draw_clock_widget(buffer, weekday, daypart, hour12, minute, is_pm, date_text, layout);
-        draw_image_widget(buffer, RIGHT_WIDGET_X, 0);
+        image_store_status_t status = image_store_status();
+        if(status == IMAGE_STORE_HAS_APPOINTMENTS) {
+            draw_image_widget(buffer, RIGHT_WIDGET_X, 0);
+        } else if(status == IMAGE_STORE_SERVER_UNAVAILABLE) {
+            draw_server_unavailable_widget(buffer, RIGHT_WIDGET_X);
+        } else {
+            draw_no_appointments_widget(buffer, RIGHT_WIDGET_X);
+        }
     } else {
         size_t first_image = 1 + (page_index - 1) * 2;
         draw_image_widget(buffer, 0, first_image);

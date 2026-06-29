@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+from urllib.parse import urljoin
 from pathlib import Path
 
 
@@ -69,18 +69,22 @@ def resolve_token(args: argparse.Namespace) -> str:
     )
 
 
-def fetch_clock_payload(url: str, token: str) -> dict:
+def fetch_bytes(url: str, token: str) -> bytes:
     request = urllib.request.Request(
         url,
         headers={"Authorization": f"Bearer {token}"},
     )
     try:
         with urllib.request.urlopen(request) as response:
-            body = response.read()
+            return response.read()
     except urllib.error.HTTPError as exc:
         raise SystemExit(f"request failed: {exc.code} {exc.reason}") from exc
     except urllib.error.URLError as exc:
         raise SystemExit(f"request failed: {exc.reason}") from exc
+
+
+def fetch_clock_payload(url: str, token: str) -> dict:
+    body = fetch_bytes(url, token)
 
     try:
         return json.loads(body)
@@ -88,21 +92,45 @@ def fetch_clock_payload(url: str, token: str) -> dict:
         raise SystemExit(f"invalid JSON response: {exc}") from exc
 
 
-def write_images(payload: dict) -> Path:
+def write_images(payload: dict, url: str, token: str) -> Path:
     output_dir = Path(tempfile.mkdtemp(prefix="memory-clock-pages-"))
     for image in payload.get("images", []):
         name = image["name"]
-        encoded = image["data_base64"]
         target = output_dir / name
-        target.write_bytes(base64.b64decode(encoded))
+        bits = fetch_bytes(urljoin(url, image["bits_path"]), token)
+        target.write_bytes(render_xbm(name.removesuffix(".xbm"), image["width"],
+                                      image["height"], bits))
     return output_dir
+
+
+def render_xbm(name: str, width: int, height: int, bits: bytes) -> bytes:
+    stride = (width + 7) // 8
+    expected_size = stride * height
+    if len(bits) != expected_size:
+        raise SystemExit(
+            f"invalid bit data for {name}: expected {expected_size} bytes, got {len(bits)}"
+        )
+
+    lines = [
+        f"#define {name}_width {width}",
+        f"#define {name}_height {height}",
+        f"static char {name}_bits[] = {{",
+    ]
+    for index in range(0, len(bits), 12):
+        chunk = bits[index:index + 12]
+        rendered = ", ".join(f"0x{value:02x}" for value in chunk)
+        suffix = "," if index + len(chunk) < len(bits) else ""
+        lines.append(f"  {rendered}{suffix}")
+    lines.append("};")
+    lines.append("")
+    return "\n".join(lines).encode("ascii")
 
 
 def main() -> int:
     args = parse_args()
     token = resolve_token(args)
     payload = fetch_clock_payload(args.url, token)
-    output_dir = write_images(payload)
+    output_dir = write_images(payload, args.url, token)
     print(output_dir)
     return 0
 

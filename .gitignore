@@ -1,3 +1,5 @@
 build/
-.env
+*.env
+__pycache__/
 server/calendar.yaml
+server/devices.jsonl

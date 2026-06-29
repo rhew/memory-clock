@@ -12,8 +12,11 @@
 #include "freertos/task.h"
 
 #include "banner.h"
+#include "clock_client.h"
 #include "display_port.h"
+#include "image_store.h"
 #include "provisioning.h"
+#include "wifi_env.h"
 
 static const char *TAG = "memory_clock";
 static uint8_t banner_buffer[BANNER_BUFFER_SIZE];
@@ -22,14 +25,15 @@ enum {
     BUTTON_HOME_GPIO = 3,
     BUTTON_RIGHT_GPIO = 4,
     BUTTON_LEFT_GPIO = 5,
-    BUTTON_DEBOUNCE_MS = 80,
+    BUTTON_DEBOUNCE_MS = 120,
     FULL_REFRESH_MINUTE_INTERVAL = 10,
     LOOP_POLL_MS = 100,
     SNTP_WAIT_MS = 15000,
 };
 
+#define CLOCK_POLL_INTERVAL_TICKS pdMS_TO_TICKS(MEMORY_CLOCK_POLL_INTERVAL_MS)
+
 typedef enum {
-    PAGE_NAV_NONE = 0,
     PAGE_NAV_PREVIOUS = -1,
     PAGE_NAV_NEXT = 1,
 } page_nav_t;
@@ -37,9 +41,8 @@ typedef enum {
 static portMUX_TYPE button_lock = portMUX_INITIALIZER_UNLOCKED;
 static volatile int pending_page_delta;
 static volatile bool pending_home_page;
-static volatile TickType_t last_home_tick;
-static volatile TickType_t last_left_tick;
-static volatile TickType_t last_right_tick;
+static volatile TickType_t last_button_tick[3];
+static volatile bool button_down[3];
 
 static void button_isr_handler(void *arg);
 
@@ -94,7 +97,7 @@ static esp_err_t buttons_init(void)
                         | (1ULL << BUTTON_RIGHT_GPIO),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
-        .intr_type = GPIO_INTR_NEGEDGE,
+        .intr_type = GPIO_INTR_ANYEDGE,
     };
     ESP_RETURN_ON_ERROR(gpio_config(&config), TAG, "button gpio config");
 
@@ -103,41 +106,44 @@ static esp_err_t buttons_init(void)
         return err;
     }
 
-    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_LEFT_GPIO, button_isr_handler,
-                                             (void *)(intptr_t)PAGE_NAV_PREVIOUS),
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_LEFT_GPIO, button_isr_handler, (void *)1),
                         TAG, "left button handler");
-    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_RIGHT_GPIO, button_isr_handler,
-                                             (void *)(intptr_t)PAGE_NAV_NEXT),
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_RIGHT_GPIO, button_isr_handler, (void *)2),
                         TAG, "right button handler");
-    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_HOME_GPIO, button_isr_handler, NULL),
+    ESP_RETURN_ON_ERROR(gpio_isr_handler_add(BUTTON_HOME_GPIO, button_isr_handler, (void *)0),
                         TAG, "home button handler");
     return ESP_OK;
 }
 
 static void button_isr_handler(void *arg)
 {
-    if(arg == NULL) {
-        TickType_t now = xTaskGetTickCountFromISR();
-        TickType_t debounce_ticks = pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS);
-        if(now - last_home_tick >= debounce_ticks) {
-            last_home_tick = now;
-            portENTER_CRITICAL_ISR(&button_lock);
-            pending_home_page = true;
-            portEXIT_CRITICAL_ISR(&button_lock);
-        }
+    int button = (int)(intptr_t)arg;
+    int gpio = button == 0 ? BUTTON_HOME_GPIO
+               : button == 1 ? BUTTON_LEFT_GPIO
+                             : BUTTON_RIGHT_GPIO;
+    TickType_t now = xTaskGetTickCountFromISR();
+    TickType_t debounce_ticks = pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS);
+    bool pressed = gpio_get_level(gpio) == 0;
+
+    if(now - last_button_tick[button] < debounce_ticks) {
         return;
     }
 
-    page_nav_t nav = (page_nav_t)(intptr_t)arg;
-    TickType_t now = xTaskGetTickCountFromISR();
-    TickType_t debounce_ticks = pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS);
-    volatile TickType_t *last_tick = nav == PAGE_NAV_PREVIOUS ? &last_left_tick : &last_right_tick;
-
-    if(now - *last_tick >= debounce_ticks) {
-        *last_tick = now;
+    if(pressed) {
+        if(button_down[button]) return;
+        button_down[button] = true;
+        last_button_tick[button] = now;
         portENTER_CRITICAL_ISR(&button_lock);
-        pending_page_delta += (int)nav;
+        if(button == 0) {
+            pending_home_page = true;
+        } else {
+            pending_page_delta += button == 1 ? PAGE_NAV_PREVIOUS : PAGE_NAV_NEXT;
+        }
         portEXIT_CRITICAL_ISR(&button_lock);
+    } else {
+        if(!button_down[button]) return;
+        button_down[button] = false;
+        last_button_tick[button] = now;
     }
 }
 
@@ -231,13 +237,46 @@ void app_main(void)
     ESP_LOGI(TAG, "time synchronized from %s", "time.cloudflare.com");
     ESP_ERROR_CHECK(buttons_init());
 
+    banner_render_status(banner_buffer, sizeof(banner_buffer), "Loading pages",
+                         MEMORY_CLOCK_SERVER_URL);
+    ESP_ERROR_CHECK(display_port_show_monochrome_full(banner_buffer, sizeof(banner_buffer),
+                                                      BANNER_WIDTH, BANNER_HEIGHT));
+    clock_client_result_t poll_result = clock_client_poll();
+    if(poll_result == CLOCK_CLIENT_ERROR) {
+        ESP_LOGW(TAG, "initial server page fetch failed");
+    }
+
     int last_minute = -1;
     size_t page_count = banner_page_count();
     size_t current_page = 0;
     bool force_full_refresh = true;
     banner_clock_layout_t clock_layout = {0};
+    TickType_t next_poll_tick = xTaskGetTickCount() + CLOCK_POLL_INTERVAL_TICKS;
     ESP_LOGI(TAG, "configured %u display page(s)", (unsigned)page_count);
     while(true) {
+        TickType_t now_tick = xTaskGetTickCount();
+        if((int32_t)(now_tick - next_poll_tick) >= 0) {
+            image_store_status_t previous_image_status = image_store_status();
+            poll_result = clock_client_poll();
+            next_poll_tick = xTaskGetTickCount() + CLOCK_POLL_INTERVAL_TICKS;
+            if(poll_result == CLOCK_CLIENT_UPDATED) {
+                current_page = 0;
+                page_count = banner_page_count();
+                force_full_refresh = true;
+                ESP_LOGI(TAG, "server pages updated; redrawing first page");
+            } else if(poll_result == CLOCK_CLIENT_ERROR && image_store_count() == 0
+                      && image_store_status() != previous_image_status) {
+                current_page = 0;
+                force_full_refresh = true;
+            }
+        }
+
+        page_count = banner_page_count();
+        if(current_page >= page_count) {
+            current_page = 0;
+            force_full_refresh = true;
+        }
+
         if(apply_pending_navigation(&current_page, page_count)) {
             force_full_refresh = true;
         }

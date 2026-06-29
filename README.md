@@ -7,9 +7,11 @@ Current firmware behavior:
 - Connects to Wi-Fi using `WIFI_SSID` and `WIFI_PASSWORD` from `.env`
 - Syncs time from `time.cloudflare.com`
 - Uses New York Eastern time
-- Renders a monochrome clock page with weekday, daypart, large 12-hour time, date, and the first image widget
-- Renders additional image pages from files in `images/`, two images per page
+- Polls `CLOCK_SERVER_URL` for appointment page images
+- Renders a monochrome clock page with weekday, daypart, large 12-hour time, date, and the first appointment page
+- Renders additional appointment pages two images per page
 - Uses the left and right front buttons to change pages, with wraparound
+- Uses the top button to return to the first page
 - Uses full refresh on page changes and 10-minute boundaries
 - Uses partial refresh for minute changes while the clock page is visible
 
@@ -32,20 +34,26 @@ Create `.env` in the repo root:
 ```dotenv
 WIFI_SSID=your-ssid
 WIFI_PASSWORD=your-password
+BEARER_TOKEN=mc_your-token
+CLOCK_SERVER_URL=http://server-host:8000/clock
+CLOCK_POLL_INTERVAL_MS=300000
 ```
 
-## Images
+`CLOCK_POLL_INTERVAL_MS` defaults to 5 minutes when omitted.
 
-Image widgets live in `images/` as `*.xbm` files.
+## Appointment Pages
 
-- Each image is compiled into the firmware
-- The first image appears next to the clock
+The firmware fetches appointment pages from `CLOCK_SERVER_URL`.
+
+- The request uses `Authorization: Bearer <BEARER_TOKEN>`
+- The first server image appears next to the clock
 - Remaining images appear on later pages, two per page
-- Image files should use a basename that is a valid C identifier, for example `page1.xbm`
+- After a successful fetch, later requests send `If-Modified-Since`
+- If the server returns changed pages, the firmware replaces the in-memory pages and redraws page 1
+- If the server returns no images, the right widget says `No Appointments`
+- If the first fetch fails before any pages load, the right widget shows the logo and a server error
 
-If you add, remove, or rename image files, run `idf.py reconfigure` before rebuilding.
-
-Use the left and right buttons to change the page. The reset button has no function yet.
+Use the left and right buttons to change the page. Use the top button to return to page 1.
 
 ## Build And Flash
 
@@ -59,7 +67,6 @@ idf.py -p /dev/ttyUSB0 flash monitor
 Run `idf.py reconfigure` before rebuilding if you:
 
 - change `.env`
-- add, remove, or rename files in `images/`
 
 ## Font Assets
 

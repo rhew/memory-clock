@@ -76,17 +76,18 @@ Hardware reality:
 
 Current firmware reality:
 
-- `PSRAM` is off in the current `sdkconfig`
-- The app fits without PSRAM because it only keeps:
+- `PSRAM` is enabled in `sdkconfig`
+- The app uses internal RAM for:
   - one full monochrome frame buffer
   - one previous frame buffer for change detection
   - small temporary regions for partial updates
+- The app uses PSRAM for cached server page images
 
-Sizing that matters for future page/image work:
+Sizing that matters for page/image work:
 
 - Full-screen 1-bit image: about `48 KB`
 - Half-screen 1-bit image: about `24 KB`
-- A few pages of half-screen monochrome widgets are easy if PSRAM is enabled
+- A few pages of half-screen monochrome widgets are easy with PSRAM enabled
 
 Examples:
 
@@ -97,7 +98,7 @@ Examples:
 Project impact:
 
 - Clock-only firmware does not need PSRAM
-- Cached image widgets or multi-page pre-rendered layouts likely should use PSRAM
+- Cached image widgets and multi-page pre-rendered layouts use PSRAM
 
 ## Expansion Header
 
@@ -144,7 +145,6 @@ These hardware features are not wired into the app yet:
 - Bluetooth
 - SD card
 - grayscale panel mode
-- PSRAM
 
 ## Sources
 

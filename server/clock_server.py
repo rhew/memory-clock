@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 from dataclasses import dataclass
@@ -12,6 +11,7 @@ from email.utils import formatdate, parsedate_to_datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageDraw, ImageFont
@@ -20,19 +20,21 @@ import yaml
 
 PAGE_WIDTH = 400
 PAGE_HEIGHT = 480
-PAGE_PADDING = 18
+PAGE_PADDING = 14
+FRAME_TOP = 32
+HEADING_Y = 22
 FRAME_RADIUS = 18
 FRAME_BORDER = 4
 DATE_CHIP_TOP = 14
 DATE_CHIP_LEFT = 14
-PLAN_TOP_PADDING = 28
-PLAN_SIDE_PADDING = 14
-PLAN_BOTTOM_PADDING = 14
+PLAN_TOP_PADDING = 24
+PLAN_SIDE_PADDING = 12
+PLAN_BOTTOM_PADDING = 10
 APPOINTMENTS_LEFT = 18
-APPOINTMENTS_TOP = 10
-APPOINTMENT_GAP = 12
-SECTION_GAP = 3
-NEXT_HEADING_GAP = 24
+APPOINTMENTS_TOP = 8
+APPOINTMENT_GAP = 8
+SECTION_GAP = 1
+NEXT_HEADING_GAP = 20
 
 STATIC_TZ = "EST5EDT,M3.2.0/2,M11.1.0/2"
 STATIC_NTP = "time.cloudflare.com"
@@ -44,10 +46,26 @@ DEFAULT_DEVICES_PATH = BASE_DIR / "devices.jsonl"
 
 FONT_CANDIDATES = {
     "regular": (
+        "/usr/share/fonts/truetype/lato/Lato-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
     ),
+    "medium": (
+        "/usr/share/fonts/truetype/lato/Lato-Medium.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Medium.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    ),
+    "semibold": (
+        "/usr/share/fonts/truetype/lato/Lato-Semibold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-SemiBold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
+    ),
     "bold": (
+        "/usr/share/fonts/truetype/lato/Lato-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
     ),
@@ -67,7 +85,7 @@ class CalendarPage:
     label: str
     plan: str
     appointments: tuple[Appointment, ...]
-    show_next_heading: bool = False
+    heading: str = ""
 
 
 def load_font(kind: str, size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -78,11 +96,12 @@ def load_font(kind: str, size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeF
     return ImageFont.load_default()
 
 
-FONT_DATE = load_font("bold", 22)
-FONT_PLAN = load_font("bold", 21)
+FONT_DATE = load_font("semibold", 23)
+FONT_PLAN = load_font("semibold", 21)
 FONT_TIME = load_font("bold", 24)
-FONT_TITLE = load_font("bold", 22)
-FONT_LOCATION = load_font("bold", 18)
+FONT_HEADING = load_font("semibold", 26)
+FONT_TITLE = load_font("semibold", 23)
+FONT_LOCATION = load_font("medium", 19)
 
 
 def parse_calendar(path: Path) -> list[CalendarPage]:
@@ -103,17 +122,21 @@ def parse_calendar(path: Path) -> list[CalendarPage]:
             )
             for item in entry.get("appointments", [])
         )
-        label = "Today" if when == today else when.strftime("%B ").replace(" 0", " ") + str(when.day)
-        pages.append(CalendarPage(when=when, label=label, plan=plan, appointments=appointments))
+        label = when.strftime("%B ").replace(" 0", " ") + str(when.day)
+        heading = "Today" if when == today else ""
+        pages.append(
+            CalendarPage(when=when, label=label, plan=plan,
+                         appointments=appointments, heading=heading)
+        )
     pages.sort(key=lambda page: page.when)
-    if pages and pages[0].label != "Today":
+    if pages and pages[0].heading == "":
         first_page = pages[0]
         pages[0] = CalendarPage(
             when=first_page.when,
             label=first_page.label,
             plan=first_page.plan,
             appointments=first_page.appointments,
-            show_next_heading=True,
+            heading="Next Appointment",
         )
     return pages
 
@@ -159,10 +182,11 @@ def path_mtime(path: Path) -> int:
     return int(path.stat().st_mtime)
 
 
-def effective_last_modified(calendar_path: Path) -> int:
+def effective_last_modified(calendar_path: Path, server_started_at: int) -> int:
     return max(
         path_mtime(calendar_path),
         start_of_today_timestamp(),
+        server_started_at,
     )
 
 
@@ -209,16 +233,16 @@ def render_page_image(page: CalendarPage) -> Image.Image:
     draw = ImageDraw.Draw(image)
 
     content_left = PAGE_PADDING
-    content_top = PAGE_PADDING
+    content_top = FRAME_TOP
     content_right = PAGE_WIDTH - PAGE_PADDING
     plan_width = content_right - content_left
 
-    if page.show_next_heading:
-        heading_text = "Next Appointment"
-        heading_width = int(draw.textlength(heading_text, font=FONT_TITLE))
+    if page.heading:
+        heading_text = page.heading
+        heading_width = int(draw.textlength(heading_text, font=FONT_HEADING))
         heading_x = content_left + (plan_width - heading_width) // 2
-        draw.text((heading_x, content_top), heading_text, fill=0, font=FONT_TITLE)
-        content_top += line_height(FONT_TITLE) + NEXT_HEADING_GAP
+        draw.text((heading_x, HEADING_Y), heading_text, fill=0, font=FONT_HEADING)
+        content_top += line_height(FONT_HEADING) + NEXT_HEADING_GAP
 
     plan_date_text = page.label
 
@@ -290,11 +314,10 @@ def render_page_image(page: CalendarPage) -> Image.Image:
     return image
 
 
-def render_page_xbm(page_name: str, image: Image.Image) -> bytes:
+def render_page_bits(image: Image.Image) -> bytes:
     mono = image.convert("1")
     width, height = mono.size
-    stride = (width + 7) // 8
-    data: list[int] = []
+    data = bytearray()
 
     for y in range(height):
         for byte_start in range(0, width, 8):
@@ -308,21 +331,7 @@ def render_page_xbm(page_name: str, image: Image.Image) -> bytes:
                     value |= 1 << bit
             data.append(value)
 
-    lines = [
-        f"#define {page_name}_width {width}",
-        f"#define {page_name}_height {height}",
-        f"static char {page_name}_bits[] = {{",
-    ]
-
-    for index in range(0, len(data), 12):
-        chunk = data[index:index + 12]
-        rendered = ", ".join(f"0x{value:02x}" for value in chunk)
-        suffix = "," if index + len(chunk) < len(data) else ""
-        lines.append(f"  {rendered}{suffix}")
-
-    lines.append("};")
-    lines.append("")
-    return "\n".join(lines).encode("ascii")
+    return bytes(data)
 
 
 def build_payload(calendar_path: Path) -> dict[str, object]:
@@ -330,17 +339,16 @@ def build_payload(calendar_path: Path) -> dict[str, object]:
     image_pages = []
     for index, page in enumerate(pages, start=1):
         page_name = f"page{index:02d}"
-        image = render_page_image(page)
-        image_bytes = render_page_xbm(page_name, image)
         image_pages.append(
             {
                 "name": f"{page_name}.xbm",
                 "mime_type": "image/x-xbitmap",
+                "encoding": "xbm-bits",
                 "width": PAGE_WIDTH,
                 "height": PAGE_HEIGHT,
                 "date": page.when.isoformat(),
                 "label": page.label,
-                "data_base64": base64.b64encode(image_bytes).decode("ascii"),
+                "bits_path": f"/clock/images/{page_name}.bin",
             }
         )
 
@@ -349,6 +357,20 @@ def build_payload(calendar_path: Path) -> dict[str, object]:
         "ntp": STATIC_NTP,
         "images": image_pages,
     }
+
+
+def render_page_bits_by_name(calendar_path: Path, name: str) -> bytes | None:
+    pages = parse_calendar(calendar_path)
+    if not name.startswith("page") or not name.endswith(".bin"):
+        return None
+    try:
+        index = int(name[4:-4])
+    except ValueError:
+        return None
+    if index < 1 or index > len(pages):
+        return None
+
+    return render_page_bits(render_page_image(pages[index - 1]))
 
 
 def hash_token(token: str) -> str:
@@ -373,26 +395,38 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
     def app(self) -> "ClockServer":
         return self.server  # type: ignore[return-value]
 
-    def do_GET(self) -> None:
-        if self.path != "/clock":
-            self.send_error(HTTPStatus.NOT_FOUND, "not found")
-            return
-
+    def authenticated_device(self) -> str | None:
         token = bearer_token(self.headers)
         if token is None:
             self.send_response(HTTPStatus.UNAUTHORIZED)
             self.send_header("WWW-Authenticate", "Bearer")
             self.end_headers()
-            return
+            return None
 
         token_hash = hash_token(token)
         devices = load_devices(self.app.devices_path)
         device_description = devices.get(token_hash)
         if device_description is None:
             self.send_error(HTTPStatus.FORBIDDEN, "unknown device token")
+            return None
+        return device_description
+
+    def do_GET(self) -> None:
+        parsed_url = urlparse(self.path)
+        if parsed_url.path.startswith("/clock/images/"):
+            self.handle_image_request(parsed_url.path)
             return
 
-        last_modified = effective_last_modified(self.app.calendar_path)
+        if parsed_url.path != "/clock":
+            self.send_error(HTTPStatus.NOT_FOUND, "not found")
+            return
+
+        device_description = self.authenticated_device()
+        if device_description is None:
+            return
+
+        last_modified = effective_last_modified(self.app.calendar_path,
+                                                self.app.server_started_at)
         if_modified_since = httpdate_to_timestamp(self.headers.get("If-Modified-Since", ""))
         if if_modified_since is not None and last_modified <= if_modified_since:
             self.send_response(HTTPStatus.NOT_MODIFIED)
@@ -411,6 +445,25 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def handle_image_request(self, path: str) -> None:
+        if self.authenticated_device() is None:
+            return
+
+        name = path.rsplit("/", 1)[-1]
+        bits = render_page_bits_by_name(self.app.calendar_path, name)
+        if bits is None:
+            self.send_error(HTTPStatus.NOT_FOUND, "image not found")
+            return
+
+        last_modified = effective_last_modified(self.app.calendar_path,
+                                                self.app.server_started_at)
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(bits)))
+        self.send_header("Last-Modified", formatdate(last_modified, usegmt=True))
+        self.end_headers()
+        self.wfile.write(bits)
+
     def log_message(self, fmt: str, *args) -> None:
         print("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), fmt % args))
 
@@ -421,6 +474,7 @@ class ClockServer(ThreadingHTTPServer):
         super().__init__(server_address, ClockRequestHandler)
         self.calendar_path = calendar_path
         self.devices_path = devices_path
+        self.server_started_at = int(datetime.now(timezone.utc).timestamp())
 
 
 def parse_args() -> argparse.Namespace:

@@ -4,15 +4,16 @@
 - Requires `Authorization: Bearer <token>`
 - Hashes the bearer token and matches it against `server/devices.jsonl`
 - Reads `server/calendar.yaml`
-- Sorts pages by date, drops entries before today, labels today as `Today`
-- Renders each calendar entry to a `400x480` XBM page
+- Sorts pages by date and drops entries before today
+- Renders each calendar entry to a `400x480` 1-bit image
 - Reloads `calendar.yaml` and `devices.jsonl` on each request
 - Supports `If-Modified-Since` and returns `304 Not Modified` when neither calendar changes nor date-driven rendering changes have occurred
+- Treats server startup as a content change so devices refresh after a restart
 
 Returns JSON with:
 - `tz`
 - `ntp`
-- `images` as base64 XBM payloads
+- `images` as XBM bit metadata with per-image raw bit paths
 - `device` description for the matched token
 
 Response shape:
@@ -29,7 +30,8 @@ Response shape:
       "height": 480,
       "date": "2026-06-29",
       "label": "June 29",
-      "data_base64": "..."
+      "encoding": "xbm-bits",
+      "bits_path": "/clock/images/page01.bin"
     }
   ],
   "device": "memory-clock"
