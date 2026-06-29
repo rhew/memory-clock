@@ -35,7 +35,7 @@ Create `.env` in the repo root:
 WIFI_SSID=your-ssid
 WIFI_PASSWORD=your-password
 BEARER_TOKEN=mc_your-token
-CLOCK_SERVER_URL=http://server-host:8000/clock
+CLOCK_SERVER_URL=https://rhew.org/memory-clock
 CLOCK_POLL_INTERVAL_MS=300000
 ```
 

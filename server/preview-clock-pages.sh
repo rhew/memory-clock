@@ -6,7 +6,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 server_host="127.0.0.1"
 server_port="$((18000 + (${RANDOM:-0} % 10000)))"
-clock_url="http://${server_host}:${server_port}/clock"
+clock_url="http://${server_host}:${server_port}/memory-clock"
 server_log="$(mktemp /tmp/memory-clock-server.XXXXXX.log)"
 
 server_pid=""

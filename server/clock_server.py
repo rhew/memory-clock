@@ -39,6 +39,8 @@ NEXT_HEADING_GAP = 20
 STATIC_TZ = "EST5EDT,M3.2.0/2,M11.1.0/2"
 STATIC_NTP = "time.cloudflare.com"
 DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
+BASE_PATH = "/memory-clock"
+IMAGE_PATH_PREFIX = f"{BASE_PATH}/images/"
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CALENDAR_PATH = BASE_DIR / "calendar.yaml"
@@ -348,7 +350,7 @@ def build_payload(calendar_path: Path) -> dict[str, object]:
                 "height": PAGE_HEIGHT,
                 "date": page.when.isoformat(),
                 "label": page.label,
-                "bits_path": f"/clock/images/{page_name}.bin",
+                "bits_path": f"{IMAGE_PATH_PREFIX}{page_name}.bin",
             }
         )
 
@@ -413,11 +415,11 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
-        if parsed_url.path.startswith("/clock/images/"):
+        if parsed_url.path.startswith(IMAGE_PATH_PREFIX):
             self.handle_image_request(parsed_url.path)
             return
 
-        if parsed_url.path != "/clock":
+        if parsed_url.path != BASE_PATH:
             self.send_error(HTTPStatus.NOT_FOUND, "not found")
             return
 
@@ -491,7 +493,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     server = ClockServer((args.host, args.port), args.calendar.resolve(), args.devices.resolve())
-    print(f"Serving /clock on http://{args.host}:{args.port}/clock")
+    print(f"Serving {BASE_PATH} on http://{args.host}:{args.port}{BASE_PATH}")
     print(f"Calendar: {server.calendar_path}")
     print(f"Devices: {server.devices_path}")
     server.serve_forever()

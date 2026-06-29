@@ -1,6 +1,6 @@
 # `clock_server.py`
 
-- Serves `GET /clock`
+- Serves `GET /memory-clock`
 - Requires `Authorization: Bearer <token>`
 - Hashes the bearer token and matches it against `server/devices.jsonl`
 - Reads `server/calendar.yaml`
@@ -31,9 +31,50 @@ Response shape:
       "date": "2026-06-29",
       "label": "June 29",
       "encoding": "xbm-bits",
-      "bits_path": "/clock/images/page01.bin"
+      "bits_path": "/memory-clock/images/page01.bin"
     }
   ],
   "device": "memory-clock"
 }
 ```
+
+## Container
+
+Build the server image from `server/`:
+
+```bash
+docker build -t memory-clock-server .
+```
+
+The image installs the Python packages and fonts needed for rendering. It expects:
+
+- `/data/calendar.yaml`
+- `/data/devices.jsonl`
+
+It listens on port `8000` inside the container.
+
+## Server Deployment
+
+The server handles `GET /memory-clock` and per-image paths under `/memory-clock/images/`.
+
+Example `compose.yml` service:
+
+```yaml
+  memory-clock:
+    build:
+      context: ../memory-clock/server
+    container_name: memory-clock
+    volumes:
+      - ./memory-clock-data/calendar.yaml:/data/calendar.yaml:ro
+      - ./memory-clock-data/devices.jsonl:/data/devices.jsonl:ro
+    networks:
+      - reverse_proxy
+    restart: unless-stopped
+```
+
+Example Caddy route:
+
+```caddyfile
+reverse_proxy /memory-clock* memory-clock:8000
+```
+

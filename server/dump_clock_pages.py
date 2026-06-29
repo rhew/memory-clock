@@ -32,12 +32,12 @@ def load_env_token(path: Path) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Fetch /clock and dump image pages to a temporary directory.",
+        description="Fetch /memory-clock and dump image pages to a temporary directory.",
     )
     parser.add_argument(
         "--url",
-        default="http://127.0.0.1:8000/clock",
-        help="clock endpoint URL, default: http://127.0.0.1:8000/clock",
+        default="http://127.0.0.1:8000/memory-clock",
+        help="clock endpoint URL, default: http://127.0.0.1:8000/memory-clock",
     )
     parser.add_argument(
         "--token",
