@@ -1,5 +1,8 @@
 build/
+build-*/
 *.env
 __pycache__/
+/venv/
 server/calendar.yaml
 server/devices.jsonl
+server/local-data/

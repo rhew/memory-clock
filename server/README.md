@@ -46,7 +46,7 @@ Build the server image from `server/`:
 docker build -t memory-clock-server .
 ```
 
-The image installs the Python packages and fonts needed for rendering. It expects:
+The image installs the Python packages from `requirements.txt` and the fonts needed for rendering. It expects:
 
 - `/data/calendar.yaml`
 - `/data/devices.jsonl`

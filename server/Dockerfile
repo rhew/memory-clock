@@ -6,11 +6,10 @@ RUN apt-get update \
         fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir \
-    pillow \
-    pyyaml
-
 WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY clock_server.py ./
 
 EXPOSE 8000
