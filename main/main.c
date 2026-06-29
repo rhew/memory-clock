@@ -66,7 +66,6 @@ static esp_err_t clock_sync_time(void)
 
 static const char *clock_daypart(int hour)
 {
-    if(hour < 5) return "Night";
     if(hour < 12) return "Morning";
     if(hour < 17) return "Afternoon";
     if(hour < 21) return "Evening";
