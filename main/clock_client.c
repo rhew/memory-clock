@@ -15,6 +15,7 @@
 #include "image_store.h"
 
 static const char *TAG = "clock_client";
+static const char *CLIENT_VERSION_HEADER = "X-Memory-Clock-Version";
 
 enum {
     HTTP_TIMEOUT_MS = 15000,
@@ -352,6 +353,7 @@ clock_client_result_t clock_client_poll(void)
 
     esp_http_client_set_method(client, HTTP_METHOD_GET);
     esp_http_client_set_header(client, "Authorization", "Bearer " MEMORY_CLOCK_BEARER_TOKEN);
+    esp_http_client_set_header(client, CLIENT_VERSION_HEADER, MEMORY_CLOCK_VERSION);
     if(have_cached_images && cached_last_modified[0] != '\0') {
         esp_http_client_set_header(client, "If-Modified-Since", cached_last_modified);
     }

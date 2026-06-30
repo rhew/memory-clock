@@ -209,6 +209,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
     timezone_init();
+    ESP_LOGI(TAG, "firmware version %s", MEMORY_CLOCK_VERSION);
 
     banner_render_status(banner_buffer, sizeof(banner_buffer), "Connecting to",
                          provisioning_ssid());

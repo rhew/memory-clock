@@ -42,6 +42,7 @@ STATIC_NTP = "time.cloudflare.com"
 DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
 BASE_PATH = "/memory-clock"
 IMAGE_PATH_PREFIX = f"{BASE_PATH}/images/"
+CLIENT_VERSION_HEADER = "X-Memory-Clock-Version"
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CALENDAR_PATH = BASE_DIR / "calendar.yaml"
@@ -413,6 +414,10 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
             return None
         return device_description
 
+    def client_version(self) -> str:
+        value = self.headers.get(CLIENT_VERSION_HEADER, "").strip()
+        return value or "unknown"
+
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
         if parsed_url.path.startswith(IMAGE_PATH_PREFIX):
@@ -433,6 +438,8 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.NOT_MODIFIED)
             self.send_header("Last-Modified", formatdate(last_modified, usegmt=True))
             self.end_headers()
+            print(f"device={device_description} client={self.client_version()} GET {BASE_PATH} 304",
+                  flush=True)
             return
 
         payload = build_payload(self.app.calendar_path)
@@ -445,6 +452,8 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Last-Modified", formatdate(last_modified, usegmt=True))
         self.end_headers()
         self.wfile.write(body)
+        print(f"device={device_description} client={self.client_version()} GET {BASE_PATH} 200",
+              flush=True)
 
     def handle_image_request(self, path: str) -> None:
         if self.authenticated_device() is None:
