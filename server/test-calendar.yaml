@@ -1,0 +1,9 @@
+- date: 2026-07-01
+  plan: "Dr. Umbra is taking you to the volcano lair at 9:00 AM. Sturm will meet you there at 9:15 AM."
+  appointments:
+    - time: "09:30"
+      title: "Practice Menacing Laugh"
+      location: "Conference Room 13, Volcano Level"
+    - time: "14:00"
+      title: "Quarterly Cape Swish Audit"
+      location: "Wardrobe Lab, Subbasement B"
