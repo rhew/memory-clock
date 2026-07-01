@@ -247,7 +247,7 @@ def render_page_image(page: CalendarPage) -> Image.Image:
         draw.text((heading_x, HEADING_Y), heading_text, fill=0, font=FONT_HEADING)
         content_top += line_height(FONT_HEADING) + NEXT_HEADING_GAP
 
-    plan_date_text = page.label
+    plan_date_text = f"{page.when.strftime('%A')}, {page.label}"
 
     plan_text_lines = wrap_text(
         draw,
