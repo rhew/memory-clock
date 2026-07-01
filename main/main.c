@@ -29,6 +29,8 @@ enum {
     FULL_REFRESH_MINUTE_INTERVAL = 10,
     LOOP_POLL_MS = 100,
     SNTP_WAIT_MS = 15000,
+    POLL_TASK_STACK_BYTES = 8192,
+    POLL_TASK_PRIORITY = 1,
 };
 
 #define CLOCK_POLL_INTERVAL_TICKS pdMS_TO_TICKS(MEMORY_CLOCK_POLL_INTERVAL_MS)
@@ -41,10 +43,14 @@ typedef enum {
 static portMUX_TYPE button_lock = portMUX_INITIALIZER_UNLOCKED;
 static volatile int pending_page_delta;
 static volatile bool pending_home_page;
-static volatile TickType_t last_button_tick[3];
+static volatile TickType_t last_button_press_tick[3];
 static volatile bool button_down[3];
+static portMUX_TYPE server_update_lock = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool pending_server_redraw;
+static volatile bool pending_server_reset_page;
 
 static void button_isr_handler(void *arg);
+static void server_poll_task(void *arg);
 
 static void timezone_init(void)
 {
@@ -124,14 +130,11 @@ static void button_isr_handler(void *arg)
     TickType_t debounce_ticks = pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS);
     bool pressed = gpio_get_level(gpio) == 0;
 
-    if(now - last_button_tick[button] < debounce_ticks) {
-        return;
-    }
-
     if(pressed) {
         if(button_down[button]) return;
+        if(now - last_button_press_tick[button] < debounce_ticks) return;
         button_down[button] = true;
-        last_button_tick[button] = now;
+        last_button_press_tick[button] = now;
         portENTER_CRITICAL_ISR(&button_lock);
         if(button == 0) {
             pending_home_page = true;
@@ -142,7 +145,6 @@ static void button_isr_handler(void *arg)
     } else {
         if(!button_down[button]) return;
         button_down[button] = false;
-        last_button_tick[button] = now;
     }
 }
 
@@ -200,6 +202,49 @@ static bool apply_pending_navigation(size_t *current_page, size_t page_count)
     return true;
 }
 
+static void publish_server_update(bool reset_page)
+{
+    portENTER_CRITICAL(&server_update_lock);
+    pending_server_redraw = true;
+    pending_server_reset_page = pending_server_reset_page || reset_page;
+    portEXIT_CRITICAL(&server_update_lock);
+}
+
+static bool take_server_update(bool *reset_page)
+{
+    portENTER_CRITICAL(&server_update_lock);
+    bool redraw = pending_server_redraw;
+    if(reset_page != NULL) {
+        *reset_page = pending_server_reset_page;
+    }
+    pending_server_redraw = false;
+    pending_server_reset_page = false;
+    portEXIT_CRITICAL(&server_update_lock);
+    return redraw;
+}
+
+static void server_poll_task(void *arg)
+{
+    (void)arg;
+    while(true) {
+        image_store_status_t previous_status = image_store_status();
+        size_t previous_count = image_store_count();
+        clock_client_result_t result = clock_client_poll();
+        image_store_status_t current_status = image_store_status();
+        size_t current_count = image_store_count();
+
+        if(result == CLOCK_CLIENT_UPDATED) {
+            publish_server_update(true);
+            ESP_LOGI(TAG, "server pages updated; queued redraw of first page");
+        } else if(result == CLOCK_CLIENT_ERROR
+                  && (current_status != previous_status || current_count != previous_count)) {
+            publish_server_update(current_count == 0);
+        }
+
+        vTaskDelay(CLOCK_POLL_INTERVAL_TICKS);
+    }
+}
+
 void app_main(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -209,6 +254,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
     timezone_init();
+    ESP_ERROR_CHECK(image_store_init());
     ESP_LOGI(TAG, "firmware version %s", MEMORY_CLOCK_VERSION);
 
     banner_render_status(banner_buffer, sizeof(banner_buffer), "Connecting to",
@@ -241,34 +287,25 @@ void app_main(void)
                          MEMORY_CLOCK_SERVER_URL);
     ESP_ERROR_CHECK(display_port_show_monochrome_full(banner_buffer, sizeof(banner_buffer),
                                                       BANNER_WIDTH, BANNER_HEIGHT));
-    clock_client_result_t poll_result = clock_client_poll();
-    if(poll_result == CLOCK_CLIENT_ERROR) {
-        ESP_LOGW(TAG, "initial server page fetch failed");
-    }
+    BaseType_t task_created = xTaskCreate(server_poll_task, "server_poll",
+                                          POLL_TASK_STACK_BYTES, NULL,
+                                          POLL_TASK_PRIORITY, NULL);
+    ESP_ERROR_CHECK(task_created == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 
     int last_minute = -1;
     size_t page_count = banner_page_count();
     size_t current_page = 0;
     bool force_full_refresh = true;
     banner_clock_layout_t clock_layout = {0};
-    TickType_t next_poll_tick = xTaskGetTickCount() + CLOCK_POLL_INTERVAL_TICKS;
     ESP_LOGI(TAG, "configured %u display page(s)", (unsigned)page_count);
     while(true) {
-        TickType_t now_tick = xTaskGetTickCount();
-        if((int32_t)(now_tick - next_poll_tick) >= 0) {
-            image_store_status_t previous_image_status = image_store_status();
-            poll_result = clock_client_poll();
-            next_poll_tick = xTaskGetTickCount() + CLOCK_POLL_INTERVAL_TICKS;
-            if(poll_result == CLOCK_CLIENT_UPDATED) {
-                current_page = 0;
-                page_count = banner_page_count();
-                force_full_refresh = true;
-                ESP_LOGI(TAG, "server pages updated; redrawing first page");
-            } else if(poll_result == CLOCK_CLIENT_ERROR && image_store_count() == 0
-                      && image_store_status() != previous_image_status) {
-                current_page = 0;
-                force_full_refresh = true;
-            }
+        bool reset_page = false;
+        if(take_server_update(&reset_page)) {
+            if(reset_page) current_page = 0;
+            page_count = banner_page_count();
+            force_full_refresh = true;
+            ESP_LOGI(TAG, "server page state changed; redrawing page %u/%u",
+                     (unsigned)(current_page + 1), (unsigned)page_count);
         }
 
         page_count = banner_page_count();

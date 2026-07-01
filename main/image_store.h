@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "esp_err.h"
+
 typedef struct {
     uint8_t *bits;
     int width;
@@ -20,6 +22,9 @@ typedef enum {
     IMAGE_STORE_SERVER_UNAVAILABLE,
 } image_store_status_t;
 
+esp_err_t image_store_init(void);
+void image_store_lock(void);
+void image_store_unlock(void);
 size_t image_store_count(void);
 const memory_clock_image_t *image_store_get(size_t index);
 image_store_status_t image_store_status(void);

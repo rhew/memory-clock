@@ -262,6 +262,7 @@ void banner_render_page(uint8_t *buffer, size_t buffer_size, size_t page_index,
         memset(layout, 0, sizeof(*layout));
     }
 
+    image_store_lock();
     if(page_index == 0) {
         draw_clock_widget(buffer, weekday, daypart, hour12, minute, is_pm, date_text, layout);
         image_store_status_t status = image_store_status();
@@ -277,6 +278,7 @@ void banner_render_page(uint8_t *buffer, size_t buffer_size, size_t page_index,
         draw_image_widget(buffer, 0, first_image);
         draw_image_widget(buffer, RIGHT_WIDGET_X, first_image + 1);
     }
+    image_store_unlock();
 
     draw_rounded_separator(buffer);
 }
