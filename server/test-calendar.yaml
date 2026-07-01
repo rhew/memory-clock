@@ -7,3 +7,43 @@
     - time: "14:00"
       title: "Quarterly Cape Swish Audit"
       location: "Wardrobe Lab, Subbasement B"
+
+- date: 2026-07-02
+  plan: "Agent Nix is taking you to the decoy ribbon cutting at 10:00 AM. Vela will meet you by the suspiciously large scissors."
+  appointments:
+    - time: "10:15"
+      title: "Approve Decoy Mayor Remarks"
+      location: "Civic Plaza, Portable Podium"
+    - time: "15:45"
+      title: "Review Escape Tunnel Lighting"
+      location: "Utility Hallway Behind the Fake Bakery"
+
+- date: 2026-07-03
+  plan: "Mara is taking you to the orbital weather desk after lunch. Calder will meet you near the map with too many pins."
+  appointments:
+    - time: "13:00"
+      title: "Cloud Machine Naming Session"
+      location: "Atmospheric Operations, West Console"
+    - time: "16:20"
+      title: "Thunder Button Safety Briefing"
+      location: "Control Room, Rubber Mat Area"
+
+- date: 2026-07-06
+  plan: "Bishop is taking you to the underground aquarium at 8:30 AM. Lumen will meet you at the dry entrance."
+  appointments:
+    - time: "08:45"
+      title: "Shark Tank Morale Check"
+      location: "Observation Deck, Please Do Not Tap Glass"
+    - time: "11:30"
+      title: "Laser Pointer Inventory"
+      location: "Supply Cage, Drawer Marked Definitely Pens"
+
+- date: 2026-07-07
+  plan: "Vera is taking you to the boardroom after breakfast. Dr. Finch will meet you with the quarterly charts and one dramatic envelope."
+  appointments:
+    - time: "09:00"
+      title: "Budget Review for Trapdoors"
+      location: "Boardroom A, Chair Without Lever"
+    - time: "12:10"
+      title: "Lunch With Compliance"
+      location: "Cafeteria Annex, Non-Evil Table"
