@@ -149,11 +149,15 @@ Font files:
 - `main/font_assets.h`
 
 You can regenerate fonts before building if you want to change the typeface or sizes.
+The default firmware font source is Lato Regular:
+`/usr/share/fonts/truetype/lato/Lato-Regular.ttf`. CMake fails if that file is
+missing. Set `MEMORY_CLOCK_FONT_FILE` only when regenerating the checked-in
+font assets from a different source.
 
 Example:
 
 ```bash
 cc tools/generate_fonts.c $(pkg-config --cflags --libs freetype2) -O2 -o /tmp/memory-clock-fontgen
-/tmp/memory-clock-fontgen /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf main/font_assets.c main/font_assets.h
+/tmp/memory-clock-fontgen /usr/share/fonts/truetype/lato/Lato-Regular.ttf main/font_assets.c main/font_assets.h
 idf.py build
 ```

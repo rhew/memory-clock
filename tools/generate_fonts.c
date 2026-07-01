@@ -117,11 +117,17 @@ static int emit_font(FILE *out_h, FILE *out_c, FT_Face face, const font_spec_t *
             }
         }
 
-        glyphs[i].codepoint = codepoint;
-        glyphs[i].advance = (int)(slot->advance.x >> 6);
-        glyphs[i].bitmap_offset = pixel_count / 2;
-
         if(max_col >= min_col && max_row >= min_row) {
+            if((pixel_count & 1U) != 0) {
+                if(append_packed_alpha(&bitmap_data, &pixel_count, &bitmap_capacity, 0) != 0) {
+                    free(alpha);
+                    free(glyphs);
+                    free(bitmap_data);
+                    return -1;
+                }
+            }
+
+            glyphs[i].bitmap_offset = pixel_count / 2;
             glyphs[i].width = max_col - min_col + 1;
             glyphs[i].height = max_row - min_row + 1;
             glyphs[i].left = slot->bitmap_left + min_col;
@@ -139,11 +145,15 @@ static int emit_font(FILE *out_h, FILE *out_c, FT_Face face, const font_spec_t *
                 }
             }
         } else {
+            glyphs[i].bitmap_offset = pixel_count / 2;
             glyphs[i].width = 0;
             glyphs[i].height = 0;
             glyphs[i].left = 0;
             glyphs[i].top = 0;
         }
+
+        glyphs[i].codepoint = codepoint;
+        glyphs[i].advance = (int)(slot->advance.x >> 6);
 
         free(alpha);
     }

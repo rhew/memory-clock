@@ -10,6 +10,17 @@ if(NOT EXISTS "${MEMORY_CLOCK_ENV_FILE}")
 endif()
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${MEMORY_CLOCK_ENV_FILE}")
 
+if(NOT DEFINED MEMORY_CLOCK_FONT_FILE)
+    set(MEMORY_CLOCK_FONT_FILE "/usr/share/fonts/truetype/lato/Lato-Regular.ttf")
+else()
+    get_filename_component(MEMORY_CLOCK_FONT_FILE "${MEMORY_CLOCK_FONT_FILE}" ABSOLUTE
+                           BASE_DIR "${MEMORY_CLOCK_PROJECT_DIR}")
+endif()
+if(NOT EXISTS "${MEMORY_CLOCK_FONT_FILE}")
+    message(FATAL_ERROR
+        "Missing firmware font source ${MEMORY_CLOCK_FONT_FILE}. Install Lato or set MEMORY_CLOCK_FONT_FILE.")
+endif()
+
 file(STRINGS "${MEMORY_CLOCK_ENV_FILE}" MEMORY_CLOCK_ENV_LINES)
 foreach(MEMORY_CLOCK_ENV_LINE IN LISTS MEMORY_CLOCK_ENV_LINES)
     string(STRIP "${MEMORY_CLOCK_ENV_LINE}" MEMORY_CLOCK_ENV_LINE)
@@ -83,6 +94,7 @@ string(REPLACE "\"" "\\\"" MEMORY_CLOCK_VERSION_ESCAPED "${MEMORY_CLOCK_VERSION_
 message(STATUS "memory-clock Wi-Fi SSID: ${WIFI_SSID}")
 message(STATUS "memory-clock server URL: ${CLOCK_SERVER_URL}")
 message(STATUS "memory-clock version: ${MEMORY_CLOCK_VERSION}")
+message(STATUS "memory-clock font source: ${MEMORY_CLOCK_FONT_FILE}")
 
 set(MEMORY_CLOCK_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${MEMORY_CLOCK_GENERATED_DIR}")

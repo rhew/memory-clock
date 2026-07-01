@@ -48,31 +48,11 @@ BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CALENDAR_PATH = BASE_DIR / "calendar.yaml"
 DEFAULT_DEVICES_PATH = BASE_DIR / "devices.jsonl"
 
-FONT_CANDIDATES = {
-    "regular": (
-        "/usr/share/fonts/truetype/lato/Lato-Regular.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    ),
-    "medium": (
-        "/usr/share/fonts/truetype/lato/Lato-Medium.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Medium.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-    ),
-    "semibold": (
-        "/usr/share/fonts/truetype/lato/Lato-Semibold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-SemiBold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-    ),
-    "bold": (
-        "/usr/share/fonts/truetype/lato/Lato-Bold.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-    ),
+FONT_PATHS = {
+    "regular": Path("/usr/share/fonts/truetype/lato/Lato-Regular.ttf"),
+    "medium": Path("/usr/share/fonts/truetype/lato/Lato-Medium.ttf"),
+    "semibold": Path("/usr/share/fonts/truetype/lato/Lato-Semibold.ttf"),
+    "bold": Path("/usr/share/fonts/truetype/lato/Lato-Bold.ttf"),
 }
 
 
@@ -92,12 +72,11 @@ class CalendarPage:
     heading: str = ""
 
 
-def load_font(kind: str, size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
-    for candidate in FONT_CANDIDATES[kind]:
-        path = Path(candidate)
-        if path.exists():
-            return ImageFont.truetype(str(path), size)
-    return ImageFont.load_default()
+def load_font(kind: str, size: int) -> ImageFont.FreeTypeFont:
+    path = FONT_PATHS[kind]
+    if not path.exists():
+        raise FileNotFoundError(f"missing server font: {path}")
+    return ImageFont.truetype(str(path), size)
 
 
 FONT_DATE = load_font("semibold", 23)
