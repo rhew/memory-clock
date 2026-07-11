@@ -16,9 +16,11 @@
 #include "display_port.h"
 #include "image_store.h"
 #include "provisioning.h"
+#include "status.h"
 #include "wifi_env.h"
 
 static const char *TAG = "memory_clock";
+static const char *TIME_SERVER = "time.cloudflare.com";
 static uint8_t banner_buffer[BANNER_BUFFER_SIZE];
 
 enum {
@@ -60,7 +62,7 @@ static void timezone_init(void)
 
 static esp_err_t clock_sync_time(void)
 {
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("time.cloudflare.com");
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(TIME_SERVER);
     ESP_RETURN_ON_ERROR(esp_netif_sntp_init(&config), TAG, "sntp init");
     esp_err_t err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(SNTP_WAIT_MS));
     if(err != ESP_OK) {
@@ -92,7 +94,7 @@ static void render_page_frame(size_t page_index, struct tm *tm_info,
              tm_info->tm_year + 1900);
     banner_render_page(banner_buffer, sizeof(banner_buffer), page_index, weekday,
                        clock_daypart(tm_info->tm_hour), hour12, tm_info->tm_min,
-                       tm_info->tm_hour >= 12, date_text, layout);
+                       tm_info->tm_hour >= 12, date_text, status_flags(), layout);
 }
 
 static esp_err_t buttons_init(void)
@@ -230,6 +232,8 @@ static void server_poll_task(void *arg)
         image_store_status_t previous_status = image_store_status();
         size_t previous_count = image_store_count();
         clock_client_result_t result = clock_client_poll();
+        status_set_server_reachable(result != CLOCK_CLIENT_ERROR);
+        status_sample_battery();
         image_store_status_t current_status = image_store_status();
         size_t current_count = image_store_count();
 
@@ -255,6 +259,8 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
     timezone_init();
     ESP_ERROR_CHECK(image_store_init());
+    ESP_ERROR_CHECK(status_init());
+    status_sample_battery();
     ESP_LOGI(TAG, "firmware version %s", MEMORY_CLOCK_VERSION);
 
     banner_render_status(banner_buffer, sizeof(banner_buffer), "Connecting to",
@@ -265,6 +271,7 @@ void app_main(void)
     char ip_address[16];
     err = provisioning_start(ip_address, sizeof(ip_address));
     if(err == ESP_OK) {
+        status_set_wifi_connected(true);
         ESP_LOGI(TAG, "Wi-Fi connected: %s -> %s", provisioning_ssid(), ip_address);
     } else {
         banner_render_status(banner_buffer, sizeof(banner_buffer), "Failed",
@@ -276,11 +283,11 @@ void app_main(void)
         return;
     }
 
-    banner_render_status(banner_buffer, sizeof(banner_buffer), "Syncing time", "time.cloudflare.com");
+    banner_render_status(banner_buffer, sizeof(banner_buffer), "Syncing time", TIME_SERVER);
     ESP_ERROR_CHECK(display_port_show_monochrome_full(banner_buffer, sizeof(banner_buffer),
                                                       BANNER_WIDTH, BANNER_HEIGHT));
     ESP_ERROR_CHECK(clock_sync_time());
-    ESP_LOGI(TAG, "time synchronized from %s", "time.cloudflare.com");
+    ESP_LOGI(TAG, "time synchronized from %s", TIME_SERVER);
     ESP_ERROR_CHECK(buttons_init());
 
     banner_render_status(banner_buffer, sizeof(banner_buffer), "Loading pages",
@@ -323,6 +330,8 @@ void app_main(void)
         localtime_r(&now, &tm_info);
 
         bool minute_changed = tm_info.tm_min != last_minute;
+        status_set_wifi_connected(provisioning_is_connected());
+        if(status_take_changed()) force_full_refresh = true;
         bool should_render = force_full_refresh || (current_page == 0 && minute_changed);
         if(should_render) {
             render_page_frame(current_page, &tm_info, &clock_layout);

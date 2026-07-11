@@ -21,4 +21,5 @@ size_t banner_page_count(void);
 void banner_render_page(uint8_t *buffer, size_t buffer_size, size_t page_index,
                         const char *weekday, const char *daypart, int hour12,
                         int minute, bool is_pm, const char *date_text,
+                        uint32_t status_flags,
                         banner_clock_layout_t *layout);

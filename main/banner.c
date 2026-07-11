@@ -8,6 +8,8 @@
 #include "font_render.h"
 #include "image_store.h"
 #include "logo_bits.xbm"
+#include "status.h"
+#include "status_icons.h"
 
 enum {
     WIDGET_WIDTH = BANNER_WIDTH / 2,
@@ -37,6 +39,9 @@ enum {
     CLOCK_TIME_Y = 158,
     CLOCK_DATE_Y = 336,
     CLOCK_WIDGET_AMPM_GAP = 0,
+    STATUS_ICON_SIZE = 32,
+    STATUS_ICON_GAP = 10,
+    STATUS_ICON_BOTTOM_MARGIN = 16,
 };
 
 static void set_pixel(uint8_t *buffer, int x, int y, bool black)
@@ -76,6 +81,47 @@ static void draw_logo(uint8_t *buffer, int x, int y)
                 set_pixel(buffer, x + col, y + row, true);
             }
         }
+    }
+}
+
+static void draw_xbm(uint8_t *buffer, int x, int y, const uint8_t *bits, int width, int height)
+{
+    int stride = (width + 7) / 8;
+    for(int row = 0; row < height; ++row) {
+        for(int col = 0; col < width; ++col) {
+            if((bits[row * stride + col / 8] & (1 << (col & 7))) != 0) {
+                set_pixel(buffer, x + col, y + row, true);
+            }
+        }
+    }
+}
+
+static void draw_status_icons(uint8_t *buffer, uint32_t status_flags)
+{
+    static const uint8_t *const icons[] = {
+        status_icon_wifi_off_bits,
+        status_icon_cloud_off_bits,
+        status_icon_battery_exclamation_bits,
+    };
+    static const uint32_t flags[] = {
+        STATUS_FLAG_WIFI_OFF,
+        STATUS_FLAG_CLOUD_OFF,
+        STATUS_FLAG_BATTERY_LOW,
+    };
+
+    int count = 0;
+    for(size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i) {
+        if((status_flags & flags[i]) != 0) ++count;
+    }
+    if(count == 0) return;
+
+    int x = WIDGET_WIDTH - CLOCK_TEXT_RIGHT_GUTTER - count * STATUS_ICON_SIZE
+            - (count - 1) * STATUS_ICON_GAP;
+    int y = BANNER_HEIGHT - STATUS_ICON_BOTTOM_MARGIN - STATUS_ICON_SIZE;
+    for(size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); ++i) {
+        if((status_flags & flags[i]) == 0) continue;
+        draw_xbm(buffer, x, y, icons[i], STATUS_ICON_SIZE, STATUS_ICON_SIZE);
+        x += STATUS_ICON_SIZE + STATUS_ICON_GAP;
     }
 }
 
@@ -171,6 +217,12 @@ static void draw_no_appointments_widget(uint8_t *buffer, int widget_x)
                                WIDGET_WIDTH - 56, 226, "No Appointments");
 }
 
+static void draw_loading_appointments_widget(uint8_t *buffer, int widget_x)
+{
+    draw_text_centered_in_rect(buffer, &memory_clock_font_ui_small, widget_x + 28,
+                               WIDGET_WIDTH - 56, 226, "Loading Appointments");
+}
+
 static void draw_server_unavailable_widget(uint8_t *buffer, int widget_x)
 {
     draw_logo(buffer, widget_x + (WIDGET_WIDTH - logo_bits_width) / 2, 96);
@@ -253,6 +305,7 @@ size_t banner_page_count(void)
 void banner_render_page(uint8_t *buffer, size_t buffer_size, size_t page_index,
                         const char *weekday, const char *daypart, int hour12,
                         int minute, bool is_pm, const char *date_text,
+                        uint32_t status_flags,
                         banner_clock_layout_t *layout)
 {
     if(buffer_size < BANNER_BUFFER_SIZE) return;
@@ -265,9 +318,12 @@ void banner_render_page(uint8_t *buffer, size_t buffer_size, size_t page_index,
     image_store_lock();
     if(page_index == 0) {
         draw_clock_widget(buffer, weekday, daypart, hour12, minute, is_pm, date_text, layout);
+        draw_status_icons(buffer, status_flags);
         image_store_status_t status = image_store_status();
         if(status == IMAGE_STORE_HAS_APPOINTMENTS) {
             draw_image_widget(buffer, RIGHT_WIDGET_X, 0);
+        } else if(status == IMAGE_STORE_LOADING) {
+            draw_loading_appointments_widget(buffer, RIGHT_WIDGET_X);
         } else if(status == IMAGE_STORE_SERVER_UNAVAILABLE) {
             draw_server_unavailable_widget(buffer, RIGHT_WIDGET_X);
         } else {

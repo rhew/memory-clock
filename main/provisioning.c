@@ -16,13 +16,13 @@
 
 #define CONNECT_TIMEOUT_MS 30000
 #define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAILED_BIT BIT1
 
 static const char *TAG = "provisioning";
 static EventGroupHandle_t wifi_events;
 static esp_netif_t *sta_netif;
 static char connected_ip[16];
 static bool provisioning_initialized;
+static volatile bool wifi_connected;
 static wifi_err_reason_t last_disconnect_reason;
 
 static const char *wifi_reason_name(wifi_err_reason_t reason)
@@ -117,16 +117,21 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             ESP_LOGW(TAG, "dhcpc status failed: %s", esp_err_to_name(err));
         }
     } else if(event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        wifi_connected = false;
         wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
         last_disconnect_reason = event != NULL ? event->reason : WIFI_REASON_UNSPECIFIED;
         ESP_LOGW(TAG, "station disconnected, reason=%d (%s)",
                  event != NULL ? event->reason : -1,
                  wifi_reason_name(last_disconnect_reason));
-        xEventGroupSetBits(wifi_events, WIFI_FAILED_BIT);
+        esp_err_t reconnect_err = esp_wifi_connect();
+        if(reconnect_err != ESP_OK) {
+            ESP_LOGW(TAG, "Wi-Fi reconnect failed to start: %s", esp_err_to_name(reconnect_err));
+        }
     } else if(event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         esp_ip4addr_ntoa(&event->ip_info.ip, connected_ip, sizeof(connected_ip));
         ESP_LOGI(TAG, "connected with IP " IPSTR, IP2STR(&event->ip_info.ip));
+        wifi_connected = true;
         xEventGroupSetBits(wifi_events, WIFI_CONNECTED_BIT);
     }
 }
@@ -168,13 +173,19 @@ const char *provisioning_ssid(void)
     return MEMORY_CLOCK_WIFI_SSID;
 }
 
+bool provisioning_is_connected(void)
+{
+    return wifi_connected;
+}
+
 esp_err_t provisioning_start(char *ip_out, size_t ip_out_size)
 {
     ESP_RETURN_ON_ERROR(provisioning_init(), TAG, "init");
 
     connected_ip[0] = '\0';
+    wifi_connected = false;
     last_disconnect_reason = 0;
-    xEventGroupClearBits(wifi_events, WIFI_CONNECTED_BIT | WIFI_FAILED_BIT);
+    xEventGroupClearBits(wifi_events, WIFI_CONNECTED_BIT);
 
     wifi_config_t sta_config = {0};
     strlcpy((char *)sta_config.sta.ssid, MEMORY_CLOCK_WIFI_SSID, sizeof(sta_config.sta.ssid));
@@ -211,21 +222,11 @@ esp_err_t provisioning_start(char *ip_out, size_t ip_out_size)
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "station start");
     ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "station connect");
 
-    EventBits_t bits = xEventGroupWaitBits(wifi_events,
-                                           WIFI_CONNECTED_BIT | WIFI_FAILED_BIT,
-                                           pdTRUE, pdFALSE,
+    EventBits_t bits = xEventGroupWaitBits(wifi_events, WIFI_CONNECTED_BIT, pdTRUE, pdFALSE,
                                            pdMS_TO_TICKS(CONNECT_TIMEOUT_MS));
     if((bits & WIFI_CONNECTED_BIT) != 0) {
         strlcpy(ip_out, connected_ip, ip_out_size);
         return ESP_OK;
-    }
-
-    if((bits & WIFI_FAILED_BIT) != 0) {
-        ESP_LOGE(TAG, "connection failed for SSID %s: %s (%d)",
-                 MEMORY_CLOCK_WIFI_SSID,
-                 wifi_reason_name(last_disconnect_reason),
-                 (int)last_disconnect_reason);
-        return ESP_ERR_WIFI_TIMEOUT;
     }
 
     if(sta_netif != NULL) {
@@ -234,5 +235,8 @@ esp_err_t provisioning_start(char *ip_out, size_t ip_out_size)
             ESP_LOGI(TAG, "timeout IP state: " IPSTR, IP2STR(&ip_info.ip));
         }
     }
+    ESP_LOGE(TAG, "connection timed out for SSID %s; last disconnect: %s (%d)",
+             MEMORY_CLOCK_WIFI_SSID, wifi_reason_name(last_disconnect_reason),
+             (int)last_disconnect_reason);
     return ESP_ERR_TIMEOUT;
 }

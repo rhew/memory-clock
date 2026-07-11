@@ -17,6 +17,7 @@ typedef struct {
 } memory_clock_image_set_t;
 
 typedef enum {
+    IMAGE_STORE_LOADING,
     IMAGE_STORE_NO_APPOINTMENTS,
     IMAGE_STORE_HAS_APPOINTMENTS,
     IMAGE_STORE_SERVER_UNAVAILABLE,

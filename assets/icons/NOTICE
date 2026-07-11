@@ -1,0 +1,10 @@
+Status icon source files in this directory are from Tabler Icons.
+
+Copyright (c) 2020-2026 Paweł Kuna and Tabler Contributors
+License: MIT (https://github.com/tabler/tabler-icons/blob/main/LICENSE)
+Source: https://github.com/tabler/tabler-icons/tree/main/icons/outline
+
+Included icons:
+- wifi-off.svg
+- cloud-off.svg
+- battery-exclamation.svg

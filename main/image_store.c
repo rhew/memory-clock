@@ -7,7 +7,7 @@
 
 static memory_clock_image_t *stored_images;
 static size_t stored_image_count;
-static image_store_status_t stored_status = IMAGE_STORE_SERVER_UNAVAILABLE;
+static image_store_status_t stored_status = IMAGE_STORE_LOADING;
 static SemaphoreHandle_t store_mutex;
 
 static void free_images(memory_clock_image_t *images, size_t count)

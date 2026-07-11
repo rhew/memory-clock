@@ -14,6 +14,32 @@ Current firmware behavior:
 - Uses the top button to return to the first page
 - Uses full refresh on page changes and 10-minute boundaries
 - Uses partial refresh for minute changes while the clock page is visible
+- Shows unobtrusive status icons at the bottom of the clock pane only when a problem exists:
+  Wi-Fi unavailable, clock server unavailable, or battery voltage low
+
+## Status Icons
+
+The clock page omits all status indicators while healthy. It displays the selected Tabler outline
+icons in a right-aligned row only when their corresponding status is unhealthy.
+
+- `wifi-off`: no Wi-Fi IP connection
+- `cloud-off`: the last clock-server poll failed while Wi-Fi is connected
+- `battery-exclamation`: battery voltage is at or below 3.50 V; it clears at 3.60 V
+
+The E1001 battery monitor uses GPIO21 to enable its divider and GPIO1 for its ADC input. The
+firmware samples it at startup and after each existing server poll; it does not add a polling task.
+Each sample allows the divider to settle for 100 ms, uses the median of nine ADC readings, and
+ignores impossible cell voltages so a bad read cannot show a false low-battery warning.
+
+SVG sources, the Tabler MIT attribution, and the generated preview are under `assets/icons/`.
+Regenerate the checked-in 1-bit C asset after changing an SVG or its rasterization settings:
+
+```bash
+make icons
+```
+
+This target requires `inkscape` and ImageMagick. Normal ESP-IDF builds use the checked-in generated
+header and do not require those tools.
 
 ## IDF Setup
 
