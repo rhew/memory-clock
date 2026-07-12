@@ -4,9 +4,9 @@ ESP-IDF firmware for the Seeed Studio reTerminal E1001 (`800x480`, ESP32-S3).
 
 Current firmware behavior:
 
-- Connects to Wi-Fi using `WIFI_SSID` and `WIFI_PASSWORD` from `.env`
-- Syncs time from `time.cloudflare.com`
-- Uses New York Eastern time
+- Connects to Wi-Fi using `WIFI_SSID` and `WIFI_PASSWORD` from `env`
+- Syncs time from `TIME_SERVER` or `time.cloudflare.com` by default
+- Uses `TIME_ZONE` or New York Eastern time by default
 - Polls `CLOCK_SERVER_URL` for appointment page images
 - Renders a monochrome clock page with weekday, daypart, large 12-hour time, date, and the first appointment page
 - Renders additional appointment pages two images per page
@@ -55,22 +55,15 @@ Verify the board:
 esptool.py --chip esp32s3 -p /dev/ttyUSB0 chip_id
 ```
 
-Create `.env` in the repo root:
+Create `env` in the repo root. You can start from [`env.example`](./env.example):
 
-```dotenv
-WIFI_SSID=your-ssid
-WIFI_PASSWORD=your-password
-BEARER_TOKEN=mc_your-token
-CLOCK_SERVER_URL=https://rhew.org/memory-clock
-CLOCK_POLL_INTERVAL_MS=300000
-```
-
-`CLOCK_POLL_INTERVAL_MS` defaults to 5 minutes when omitted.
+Commented lines are the built-in defaults and can be omitted. Required values are:
+`WIFI_SSID`, `WIFI_PASSWORD`, `BEARER_TOKEN`, and `CLOCK_SERVER_URL`.
 
 You can build with a different env file:
 
 ```bash
-idf.py -B build-local -DMEMORY_CLOCK_ENV_FILE=.env.local reconfigure build
+idf.py -B build-local -DMEMORY_CLOCK_ENV_FILE=env.local reconfigure build
 ```
 
 ## Appointment Pages
@@ -147,25 +140,31 @@ idf.py -p /dev/ttyUSB0 flash monitor
 
 Run `idf.py reconfigure` before rebuilding if you:
 
-- change `.env`
+- change `env`
 - change which env file you pass with `MEMORY_CLOCK_ENV_FILE`
 
 For a local server test build:
 
 ```bash
 idf.py -B build-local set-target esp32s3
-idf.py -B build-local -DMEMORY_CLOCK_ENV_FILE=.env.local reconfigure build
+idf.py -B build-local -DMEMORY_CLOCK_ENV_FILE=env.local reconfigure build
 idf.py -B build-local -p /dev/ttyUSB0 flash monitor
 ```
 
-Example `.env.local`:
+Example `env.local`:
 
 ```dotenv
 WIFI_SSID=your-ssid
 WIFI_PASSWORD=your-password
 BEARER_TOKEN=mc_your-existing-test-token
 CLOCK_SERVER_URL=http://192.168.x.y:8000/memory-clock
-CLOCK_POLL_INTERVAL_MS=5000
+# CLOCK_POLL_INTERVAL_MS=300000
+# TIME_SERVER=time.cloudflare.com
+# TIME_ZONE=EST5EDT,M3.2.0/2,M11.1.0/2
+# SNTP_SYNC_TIMEOUT_MS=15000
+# WIFI_CONNECT_TIMEOUT_MS=30000
+# BATTERY_LOW_MV=3500
+# BATTERY_CLEAR_MV=3600
 ```
 
 ## Font Assets

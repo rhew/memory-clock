@@ -1,6 +1,8 @@
 build/
 build-*/
 *.env
+env
+env.local
 __pycache__/
 /venv/
 server/calendar.yaml

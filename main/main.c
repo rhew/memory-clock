@@ -20,7 +20,6 @@
 #include "wifi_env.h"
 
 static const char *TAG = "memory_clock";
-static const char *TIME_SERVER = "time.cloudflare.com";
 static uint8_t banner_buffer[BANNER_BUFFER_SIZE];
 
 enum {
@@ -30,7 +29,6 @@ enum {
     BUTTON_DEBOUNCE_MS = 120,
     FULL_REFRESH_MINUTE_INTERVAL = 10,
     LOOP_POLL_MS = 100,
-    SNTP_WAIT_MS = 15000,
     POLL_TASK_STACK_BYTES = 8192,
     POLL_TASK_PRIORITY = 1,
 };
@@ -56,15 +54,15 @@ static void server_poll_task(void *arg);
 
 static void timezone_init(void)
 {
-    setenv("TZ", "EST5EDT,M3.2.0/2,M11.1.0/2", 1);
+    setenv("TZ", MEMORY_CLOCK_TIME_ZONE, 1);
     tzset();
 }
 
 static esp_err_t clock_sync_time(void)
 {
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(TIME_SERVER);
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(MEMORY_CLOCK_TIME_SERVER);
     ESP_RETURN_ON_ERROR(esp_netif_sntp_init(&config), TAG, "sntp init");
-    esp_err_t err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(SNTP_WAIT_MS));
+    esp_err_t err = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(MEMORY_CLOCK_SNTP_SYNC_TIMEOUT_MS));
     if(err != ESP_OK) {
         esp_netif_sntp_deinit();
         return err;
@@ -283,11 +281,12 @@ void app_main(void)
         return;
     }
 
-    banner_render_status(banner_buffer, sizeof(banner_buffer), "Syncing time", TIME_SERVER);
+    banner_render_status(banner_buffer, sizeof(banner_buffer), "Syncing time",
+                         MEMORY_CLOCK_TIME_SERVER);
     ESP_ERROR_CHECK(display_port_show_monochrome_full(banner_buffer, sizeof(banner_buffer),
                                                       BANNER_WIDTH, BANNER_HEIGHT));
     ESP_ERROR_CHECK(clock_sync_time());
-    ESP_LOGI(TAG, "time synchronized from %s", TIME_SERVER);
+    ESP_LOGI(TAG, "time synchronized from %s", MEMORY_CLOCK_TIME_SERVER);
     ESP_ERROR_CHECK(buttons_init());
 
     banner_render_status(banner_buffer, sizeof(banner_buffer), "Loading pages",

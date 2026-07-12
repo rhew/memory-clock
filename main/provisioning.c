@@ -14,7 +14,6 @@
 
 #include "wifi_env.h"
 
-#define CONNECT_TIMEOUT_MS 30000
 #define WIFI_CONNECTED_BIT BIT0
 
 static const char *TAG = "provisioning";
@@ -223,7 +222,7 @@ esp_err_t provisioning_start(char *ip_out, size_t ip_out_size)
     ESP_RETURN_ON_ERROR(esp_wifi_connect(), TAG, "station connect");
 
     EventBits_t bits = xEventGroupWaitBits(wifi_events, WIFI_CONNECTED_BIT, pdTRUE, pdFALSE,
-                                           pdMS_TO_TICKS(CONNECT_TIMEOUT_MS));
+                                           pdMS_TO_TICKS(MEMORY_CLOCK_WIFI_CONNECT_TIMEOUT_MS));
     if((bits & WIFI_CONNECTED_BIT) != 0) {
         strlcpy(ip_out, connected_ip, ip_out_size);
         return ESP_OK;

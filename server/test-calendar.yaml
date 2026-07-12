@@ -1,4 +1,4 @@
-- date: 2026-07-01
+- date: 2026-07-13
   plan: "Dr. Umbra is taking you to the volcano lair at 9:00 AM. Sturm will meet you there at 9:15 AM."
   appointments:
     - time: "09:30"
@@ -8,7 +8,7 @@
       title: "Quarterly Cape Swish Audit"
       location: "Wardrobe Lab, Subbasement B"
 
-- date: 2026-07-02
+- date: 2026-07-14
   plan: "Agent Nix is taking you to the decoy ribbon cutting at 10:00 AM. Vela will meet you by the suspiciously large scissors."
   appointments:
     - time: "10:15"
@@ -18,7 +18,7 @@
       title: "Review Escape Tunnel Lighting"
       location: "Utility Hallway Behind the Fake Bakery"
 
-- date: 2026-07-03
+- date: 2026-07-15
   plan: "Mara is taking you to the orbital weather desk after lunch. Calder will meet you near the map with too many pins."
   appointments:
     - time: "13:00"
@@ -28,7 +28,7 @@
       title: "Thunder Button Safety Briefing"
       location: "Control Room, Rubber Mat Area"
 
-- date: 2026-07-06
+- date: 2026-07-16
   plan: "Bishop is taking you to the underground aquarium at 8:30 AM. Lumen will meet you at the dry entrance."
   appointments:
     - time: "08:45"
@@ -38,7 +38,7 @@
       title: "Laser Pointer Inventory"
       location: "Supply Cage, Drawer Marked Definitely Pens"
 
-- date: 2026-07-07
+- date: 2026-07-17
   plan: "Vera is taking you to the boardroom after breakfast. Dr. Finch will meet you with the quarterly charts and one dramatic envelope."
   appointments:
     - time: "09:00"

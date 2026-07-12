@@ -10,6 +10,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "wifi_env.h"
+
 enum {
     BATTERY_ADC_GPIO = 1,
     BATTERY_ENABLE_GPIO = 21,
@@ -18,8 +20,6 @@ enum {
     BATTERY_DIVIDER_MULTIPLIER = 2,
     BATTERY_MIN_VALID_MV = 3000,
     BATTERY_MAX_VALID_MV = 4500,
-    BATTERY_LOW_MV = 3500,
-    BATTERY_CLEAR_MV = 3600,
 };
 
 static const char *TAG = "status";
@@ -173,9 +173,9 @@ bool status_sample_battery(void)
     portENTER_CRITICAL(&status_lock);
     battery_known = true;
     if(battery_low) {
-        battery_low = battery_mv < BATTERY_CLEAR_MV;
+        battery_low = battery_mv < MEMORY_CLOCK_BATTERY_CLEAR_MV;
     } else {
-        battery_low = battery_mv <= BATTERY_LOW_MV;
+        battery_low = battery_mv <= MEMORY_CLOCK_BATTERY_LOW_MV;
     }
     bool did_change = update_changed_locked();
     portEXIT_CRITICAL(&status_lock);

@@ -28,8 +28,8 @@ Response shape:
       "mime_type": "image/x-xbitmap",
       "width": 400,
       "height": 480,
-      "date": "2026-06-29",
-      "label": "June 29",
+      "date": "2026-07-13",
+      "label": "July 13",
       "encoding": "xbm-bits",
       "bits_path": "/memory-clock/images/page01.bin"
     }

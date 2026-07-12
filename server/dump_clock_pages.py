@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_ENV_PATH = BASE_DIR.parent / ".env"
+DEFAULT_ENV_PATH = BASE_DIR.parent / "env"
 
 
 def load_env_token(path: Path) -> str | None:
@@ -41,13 +41,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--token",
-        help="bearer token; defaults to BEARER_TOKEN from .env",
+        help="bearer token; defaults to BEARER_TOKEN from env",
     )
     parser.add_argument(
         "--env-file",
         type=Path,
         default=DEFAULT_ENV_PATH,
-        help=f".env path, default: {DEFAULT_ENV_PATH}",
+        help=f"env file path, default: {DEFAULT_ENV_PATH}",
     )
     return parser.parse_args()
 
@@ -65,7 +65,7 @@ def resolve_token(args: argparse.Namespace) -> str:
         return file_token
 
     raise SystemExit(
-        "missing bearer token: pass --token, set BEARER_TOKEN, or add it to .env"
+        "missing bearer token: pass --token, set BEARER_TOKEN, or add it to env"
     )
 
 
