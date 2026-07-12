@@ -74,11 +74,25 @@ The firmware fetches appointment pages from `CLOCK_SERVER_URL`.
 - The first server image appears next to the clock
 - Remaining images appear on later pages, two per page
 - After a successful fetch, later requests send `If-Modified-Since`
+- Each primary page request also carries optional `X-Memory-Clock-*` telemetry headers. Current
+  servers safely ignore them; a telemetry-aware server may record the latest battery voltage,
+  seconds since the last button press, Wi-Fi RSSI, and uptime.
 - If the server returns changed pages, the firmware replaces the in-memory pages and redraws page 1
 - If the server returns no images, the right widget says `No Appointments`
 - If the first fetch fails before any pages load, the right widget shows the logo and a server error
 
 Use the left and right buttons to change the page. Use the top button to return to page 1.
+
+The telemetry headers are sent only to `CLOCK_SERVER_URL`, not image URLs:
+
+```text
+X-Memory-Clock-Battery-Mv: 4128
+X-Memory-Clock-Last-Interaction-S: 184
+X-Memory-Clock-Wifi-Rssi: -49
+X-Memory-Clock-Uptime-S: 9281
+```
+
+Unavailable values are omitted.
 
 ## Local Server Testing
 

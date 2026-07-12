@@ -7,6 +7,7 @@
 #include "esp_check.h"
 #include "esp_netif_sntp.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -45,6 +46,8 @@ static volatile int pending_page_delta;
 static volatile bool pending_home_page;
 static volatile TickType_t last_button_press_tick[3];
 static volatile bool button_down[3];
+static volatile TickType_t last_interaction_tick;
+static volatile bool have_last_interaction;
 static portMUX_TYPE server_update_lock = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool pending_server_redraw;
 static volatile bool pending_server_reset_page;
@@ -136,6 +139,8 @@ static void button_isr_handler(void *arg)
         button_down[button] = true;
         last_button_press_tick[button] = now;
         portENTER_CRITICAL_ISR(&button_lock);
+        last_interaction_tick = now;
+        have_last_interaction = true;
         if(button == 0) {
             pending_home_page = true;
         } else {
@@ -146,6 +151,30 @@ static void button_isr_handler(void *arg)
         if(!button_down[button]) return;
         button_down[button] = false;
     }
+}
+
+static int32_t last_interaction_seconds(void)
+{
+    portENTER_CRITICAL(&button_lock);
+    bool have_interaction = have_last_interaction;
+    TickType_t interaction_tick = last_interaction_tick;
+    portEXIT_CRITICAL(&button_lock);
+
+    if(!have_interaction) return -1;
+    return (int32_t)(pdTICKS_TO_MS(xTaskGetTickCount() - interaction_tick) / 1000);
+}
+
+static clock_client_telemetry_t telemetry_snapshot(void)
+{
+    clock_client_telemetry_t telemetry = {
+        .battery_mv = -1,
+        .wifi_rssi = -128,
+        .last_interaction_seconds = last_interaction_seconds(),
+        .uptime_seconds = (uint32_t)(esp_timer_get_time() / 1000000),
+    };
+    status_get_battery_mv(&telemetry.battery_mv);
+    provisioning_get_rssi(&telemetry.wifi_rssi);
+    return telemetry;
 }
 
 static int buttons_take_pending_delta(void)
@@ -229,9 +258,10 @@ static void server_poll_task(void *arg)
     while(true) {
         image_store_status_t previous_status = image_store_status();
         size_t previous_count = image_store_count();
-        clock_client_result_t result = clock_client_poll();
-        status_set_server_reachable(result != CLOCK_CLIENT_ERROR);
         status_sample_battery();
+        clock_client_telemetry_t telemetry = telemetry_snapshot();
+        clock_client_result_t result = clock_client_poll(&telemetry);
+        status_set_server_reachable(result != CLOCK_CLIENT_ERROR);
         image_store_status_t current_status = image_store_status();
         size_t current_count = image_store_count();
 

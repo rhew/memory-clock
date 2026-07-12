@@ -16,6 +16,10 @@
 
 static const char *TAG = "clock_client";
 static const char *CLIENT_VERSION_HEADER = "X-Memory-Clock-Version";
+static const char *BATTERY_MV_HEADER = "X-Memory-Clock-Battery-Mv";
+static const char *LAST_INTERACTION_HEADER = "X-Memory-Clock-Last-Interaction-S";
+static const char *WIFI_RSSI_HEADER = "X-Memory-Clock-Wifi-Rssi";
+static const char *UPTIME_HEADER = "X-Memory-Clock-Uptime-S";
 
 enum {
     HTTP_TIMEOUT_MS = 15000,
@@ -33,6 +37,31 @@ typedef struct {
 
 static char cached_last_modified[96];
 static bool have_cached_images;
+
+static void set_integer_header(esp_http_client_handle_t client, const char *name, int value)
+{
+    char value_text[16];
+    snprintf(value_text, sizeof(value_text), "%d", value);
+    esp_http_client_set_header(client, name, value_text);
+}
+
+static void set_telemetry_headers(esp_http_client_handle_t client,
+                                  const clock_client_telemetry_t *telemetry)
+{
+    if(telemetry == NULL) return;
+
+    if(telemetry->battery_mv >= 0) {
+        set_integer_header(client, BATTERY_MV_HEADER, telemetry->battery_mv);
+    }
+    if(telemetry->last_interaction_seconds >= 0) {
+        set_integer_header(client, LAST_INTERACTION_HEADER,
+                           telemetry->last_interaction_seconds);
+    }
+    if(telemetry->wifi_rssi > -128) {
+        set_integer_header(client, WIFI_RSSI_HEADER, telemetry->wifi_rssi);
+    }
+    set_integer_header(client, UPTIME_HEADER, (int)telemetry->uptime_seconds);
+}
 
 static void log_heap_state(const char *context)
 {
@@ -337,7 +366,7 @@ static esp_err_t parse_images_json(const char *json, memory_clock_image_set_t *s
     return ESP_OK;
 }
 
-clock_client_result_t clock_client_poll(void)
+clock_client_result_t clock_client_poll(const clock_client_telemetry_t *telemetry)
 {
     http_response_t response = {0};
     esp_http_client_config_t config = {
@@ -354,6 +383,7 @@ clock_client_result_t clock_client_poll(void)
     esp_http_client_set_method(client, HTTP_METHOD_GET);
     esp_http_client_set_header(client, "Authorization", "Bearer " MEMORY_CLOCK_BEARER_TOKEN);
     esp_http_client_set_header(client, CLIENT_VERSION_HEADER, MEMORY_CLOCK_VERSION);
+    set_telemetry_headers(client, telemetry);
     if(have_cached_images && cached_last_modified[0] != '\0') {
         esp_http_client_set_header(client, "If-Modified-Since", cached_last_modified);
     }

@@ -31,6 +31,7 @@ static bool server_known;
 static bool server_reachable;
 static bool battery_known;
 static bool battery_low;
+static int last_battery_mv;
 static uint32_t last_flags;
 static bool changed;
 
@@ -172,6 +173,7 @@ bool status_sample_battery(void)
 
     portENTER_CRITICAL(&status_lock);
     battery_known = true;
+    last_battery_mv = battery_mv;
     if(battery_low) {
         battery_low = battery_mv < MEMORY_CLOCK_BATTERY_CLEAR_MV;
     } else {
@@ -180,6 +182,17 @@ bool status_sample_battery(void)
     bool did_change = update_changed_locked();
     portEXIT_CRITICAL(&status_lock);
     return did_change;
+}
+
+bool status_get_battery_mv(int *battery_mv_out)
+{
+    if(battery_mv_out == NULL) return false;
+
+    portENTER_CRITICAL(&status_lock);
+    bool known = battery_known;
+    if(known) *battery_mv_out = last_battery_mv;
+    portEXIT_CRITICAL(&status_lock);
+    return known;
 }
 
 uint32_t status_flags(void)

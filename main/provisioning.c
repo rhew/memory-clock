@@ -177,6 +177,16 @@ bool provisioning_is_connected(void)
     return wifi_connected;
 }
 
+bool provisioning_get_rssi(int8_t *rssi_out)
+{
+    if(rssi_out == NULL || !wifi_connected) return false;
+
+    wifi_ap_record_t ap_info;
+    if(esp_wifi_sta_get_ap_info(&ap_info) != ESP_OK) return false;
+    *rssi_out = ap_info.rssi;
+    return true;
+}
+
 esp_err_t provisioning_start(char *ip_out, size_t ip_out_size)
 {
     ESP_RETURN_ON_ERROR(provisioning_init(), TAG, "init");

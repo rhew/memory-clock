@@ -43,6 +43,14 @@ DISPLAY_TIMEZONE = ZoneInfo("America/New_York")
 BASE_PATH = "/memory-clock"
 IMAGE_PATH_PREFIX = f"{BASE_PATH}/images/"
 CLIENT_VERSION_HEADER = "X-Memory-Clock-Version"
+TELEMETRY_HEADER_PREFIX = "x-memory-clock-"
+
+TELEMETRY_HEADERS = {
+    "x-memory-clock-battery-mv": ("battery", 2500, 5000),
+    "x-memory-clock-last-interaction-s": ("last_input", 0, 3155760000),
+    "x-memory-clock-wifi-rssi": ("rssi", -127, 0),
+    "x-memory-clock-uptime-s": ("uptime", 0, 4294967295),
+}
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CALENDAR_PATH = BASE_DIR / "calendar.yaml"
@@ -370,6 +378,65 @@ def bearer_token(headers) -> str | None:
     return token or None
 
 
+def log_value(value: str, limit: int = 96) -> str:
+    """Return a single-line, bounded representation of an untrusted header value."""
+    cleaned = "".join(char if char.isprintable() else "?" for char in value)
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit] + "..."
+    return json.dumps(cleaned)
+
+
+def parse_telemetry_integer(value: str, minimum: int, maximum: int) -> int | None:
+    value = value.strip()
+    digits = value[1:] if value.startswith("-") else value
+    if not digits or not digits.isascii() or not digits.isdecimal() or len(value) > 12:
+        return None
+    try:
+        parsed = int(value, 10)
+    except ValueError:
+        return None
+    return parsed if minimum <= parsed <= maximum else None
+
+
+def format_duration(seconds: int) -> str:
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    if days:
+        return f"{days}d{hours:02}h"
+    if hours:
+        return f"{hours}h{minutes:02}m"
+    if minutes:
+        return f"{minutes}m{seconds:02}s"
+    return f"{seconds}s"
+
+
+def format_telemetry_header(name: str, value: str) -> str:
+    normalized_name = name.lower()
+    known = TELEMETRY_HEADERS.get(normalized_name)
+    if known is None:
+        return f"{name}={log_value(value)}"
+
+    label, minimum, maximum = known
+    parsed = parse_telemetry_integer(value, minimum, maximum)
+    if parsed is None:
+        return f"{label}=invalid({log_value(value)})"
+    if label == "battery":
+        return f"battery={parsed / 1000:.3f}V"
+    if label == "last_input" or label == "uptime":
+        return f"{label}={format_duration(parsed)}"
+    return f"rssi={parsed}dBm"
+
+
+def telemetry_log_fields(headers) -> str:
+    fields = [
+        format_telemetry_header(name, value)
+        for name, value in headers.items()
+        if name.lower().startswith(TELEMETRY_HEADER_PREFIX)
+    ]
+    return "" if not fields else " telemetry=" + ",".join(fields)
+
+
 class ClockRequestHandler(BaseHTTPRequestHandler):
     server_version = "MemoryClockHTTP/1.0"
 
@@ -397,6 +464,10 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         value = self.headers.get(CLIENT_VERSION_HEADER, "").strip()
         return value or "unknown"
 
+    def log_page_request(self, device_description: str, status: HTTPStatus) -> None:
+        print(f"device={device_description} client={self.client_version()} "
+              f"GET {BASE_PATH} {status.value}{telemetry_log_fields(self.headers)}", flush=True)
+
     def do_GET(self) -> None:
         parsed_url = urlparse(self.path)
         if parsed_url.path.startswith(IMAGE_PATH_PREFIX):
@@ -417,8 +488,7 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
             self.send_response(HTTPStatus.NOT_MODIFIED)
             self.send_header("Last-Modified", formatdate(last_modified, usegmt=True))
             self.end_headers()
-            print(f"device={device_description} client={self.client_version()} GET {BASE_PATH} 304",
-                  flush=True)
+            self.log_page_request(device_description, HTTPStatus.NOT_MODIFIED)
             return
 
         payload = build_payload(self.app.calendar_path)
@@ -431,8 +501,7 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Last-Modified", formatdate(last_modified, usegmt=True))
         self.end_headers()
         self.wfile.write(body)
-        print(f"device={device_description} client={self.client_version()} GET {BASE_PATH} 200",
-              flush=True)
+        self.log_page_request(device_description, HTTPStatus.OK)
 
     def handle_image_request(self, path: str) -> None:
         if self.authenticated_device() is None:

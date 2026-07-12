@@ -15,5 +15,6 @@ esp_err_t status_init(void);
 bool status_set_wifi_connected(bool connected);
 bool status_set_server_reachable(bool reachable);
 bool status_sample_battery(void);
+bool status_get_battery_mv(int *battery_mv_out);
 uint32_t status_flags(void);
 bool status_take_changed(void);
