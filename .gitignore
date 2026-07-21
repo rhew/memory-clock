@@ -8,3 +8,7 @@ __pycache__/
 server/calendar.yaml
 server/devices.jsonl
 server/local-data/
+server/local-auth/
+server/local-secrets/
+server/local-state/
+server/*.sqlite3*

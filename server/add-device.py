@@ -5,6 +5,7 @@ import hashlib
 import json
 import secrets
 import sys
+import uuid
 from pathlib import Path
 
 
@@ -38,6 +39,7 @@ def store_device(path: Path, description: str, token_hash: str) -> None:
         raise ValueError(f"device description already exists: {description}")
 
     record = {
+        "id": str(uuid.uuid4()),
         "description": description,
         "token_hash": token_hash,
     }

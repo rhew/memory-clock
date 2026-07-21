@@ -12,7 +12,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY clock_server.py ./
+COPY admin ./admin
 
 EXPOSE 8000
 
-CMD ["python", "clock_server.py", "--host", "0.0.0.0", "--port", "8000", "--calendar", "/data/calendar.yaml", "--devices", "/data/devices.jsonl"]
+CMD ["python", "clock_server.py", "--host", "0.0.0.0", "--port", "8000", "--calendar", "/data/calendar.yaml", "--devices", "/data/devices.jsonl", "--state", "/state/memory-clock.sqlite3"]

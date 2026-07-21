@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memory Clock Admin</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">Memory Clock</p>
+        <h1>Admin</h1>
+      </div>
+      <button id="logout" class="quiet hidden" type="button">Sign out</button>
+    </header>
+
+    <section id="login-view" class="login-card hidden" aria-labelledby="login-heading">
+      <p class="eyebrow">Private access</p>
+      <h2 id="login-heading">Sign in</h2>
+      <p class="muted">Use your admin token or select the token file.</p>
+      <form id="login-form">
+        <label for="admin-token">Admin token</label>
+        <input id="admin-token" name="token" type="password" autocomplete="current-password">
+        <div class="or"><span>or</span></div>
+        <label class="file-picker" for="auth-file">Choose auth file</label>
+        <input id="auth-file" type="file" accept=".token,.txt,text/plain">
+        <p id="file-name" class="file-name muted">No file selected</p>
+        <button class="primary" type="submit">Sign in</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="admin-view" class="hidden">
+      <nav class="tabs" aria-label="Admin sections">
+        <button class="tab selected" data-view="clients" type="button">Clocks</button>
+        <button class="tab" data-view="pages" type="button">Pages</button>
+        <button class="tab" data-view="calendar" type="button">Calendar</button>
+      </nav>
+
+      <section id="clients-view" class="view" aria-labelledby="clients-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Current status</p>
+            <h2 id="clients-heading">Clocks</h2>
+          </div>
+          <button id="refresh" class="quiet" type="button">Refresh</button>
+        </div>
+        <p id="clients-updated" class="muted"></p>
+        <div id="clients" class="client-grid" aria-live="polite"></div>
+      </section>
+
+      <section id="pages-view" class="view hidden" aria-labelledby="pages-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Effective calendar</p>
+            <h2 id="pages-heading">Available pages</h2>
+          </div>
+        </div>
+        <p class="muted">These are the appointment panels sent to the clocks.</p>
+        <div id="pages" class="page-grid" aria-live="polite"></div>
+      </section>
+
+      <section id="calendar-view" class="view hidden" aria-labelledby="calendar-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Read-only source</p>
+            <h2 id="calendar-heading">calendar.yaml</h2>
+          </div>
+        </div>
+        <pre id="calendar" tabindex="0"></pre>
+      </section>
+
+      <p id="admin-error" class="error" role="alert"></p>
+    </section>
+  </main>
+  <script src="admin.js" defer></script>
+</body>
+</html>

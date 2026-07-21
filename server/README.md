@@ -9,6 +9,8 @@
 - Reloads `calendar.yaml` and `devices.jsonl` on each request
 - Supports `If-Modified-Since` and returns `304 Not Modified` when neither calendar changes nor date-driven rendering changes have occurred
 - Treats server startup as a content change so devices refresh after a restart
+- Records one current status snapshot per authenticated clock poll in SQLite, including `304` polls
+- Serves an authenticated browser dashboard at `/memory-clock/admin/`
 
 Returns JSON with:
 - `tz`
@@ -38,6 +40,68 @@ Response shape:
 }
 ```
 
+## Admin Dashboard
+
+The dashboard shows every configured clock and the latest information already sent by its current
+firmware:
+
+- human-readable last-seen time
+- firmware version
+- battery voltage
+- Wi-Fi RSSI
+- uptime and estimated start time
+- last button-interaction time
+
+It does not retain telemetry history. Each poll atomically overwrites the device's single SQLite
+row, and rows for devices removed from `devices.jsonl` are pruned when the dashboard is loaded.
+Status recording is best-effort: an unavailable state database is logged but does not prevent a
+clock from receiving pages.
+
+The dashboard also provides authenticated previews of the effective appointment pages and a
+read-only view of `calendar.yaml`. It never receives a device bearer token.
+
+Create the administrator's browser token and corresponding server-side hash:
+
+```bash
+python3 create-admin-auth.py \
+  --token-file local-auth/admin.token \
+  --hash-file local-secrets/admin-token.sha256
+```
+
+Both files are created with mode `0600` and existing files are never overwritten. Keep them
+private. Configure the server with the hash file and select `admin.token` on the browser sign-in
+page:
+
+```bash
+python3 clock_server.py \
+  --host 127.0.0.1 \
+  --calendar local-data/calendar.yaml \
+  --devices local-data/devices.jsonl \
+  --state local-data/memory-clock.sqlite3 \
+  --admin-token-hash-file local-secrets/admin-token.sha256 \
+  --allow-insecure-admin-cookie
+```
+
+`--allow-insecure-admin-cookie` is strictly for loopback or trusted-LAN HTTP testing. Production
+must use HTTPS and omit that option. The browser sends the admin token only during login, does not
+put it in a URL or local storage, and then uses a 12-hour `HttpOnly`, `Secure`, `SameSite=Strict`
+session cookie. Login attempts are rate limited. The page uses no third-party scripts and applies a
+restrictive content security policy.
+
+For non-browser API access, send the admin token directly as a bearer token to the admin API:
+
+```text
+Authorization: Bearer ma_...
+```
+
+The admin token is independent of all device tokens. The server may alternatively read the hash
+from `MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE` or directly from
+`MEMORY_CLOCK_ADMIN_TOKEN_HASH`. Prefer a mounted hash file for container deployments.
+
+New device records created by `add-device.py` receive a stable opaque `id`. Existing records
+without one remain compatible and receive a deterministic, non-secret fallback ID; no firmware
+change is required.
+
 ## Container
 
 Build the server image from `server/`:
@@ -51,6 +115,11 @@ font family used for rendering. It expects:
 
 - `/data/calendar.yaml`
 - `/data/devices.jsonl`
+- a writable `/state` directory for `memory-clock.sqlite3`
+
+For an authenticated dashboard it also expects either the admin hash environment variable or a
+mounted hash file. The browser-facing `admin.token` file does not need to be mounted into the
+server.
 
 It listens on port `8000` inside the container.
 
@@ -71,6 +140,10 @@ Example `compose.yml` service:
     container_name: memory-clock
     volumes:
       - ./memory-clock-data:/data:ro
+      - ./memory-clock-state:/state
+      - ./memory-clock-secrets/admin-token.sha256:/run/secrets/memory-clock-admin.sha256:ro
+    environment:
+      MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE: /run/secrets/memory-clock-admin.sha256
     networks:
       - reverse_proxy
     restart: unless-stopped
@@ -81,3 +154,7 @@ Example Caddy route:
 ```caddyfile
 reverse_proxy /memory-clock* memory-clock:8000
 ```
+
+Keep the container port private to the Docker network so the HTTPS reverse proxy is the only public
+path to the server. The default production session cookie is secure and will therefore be sent by
+browsers only over HTTPS.

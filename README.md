@@ -74,9 +74,9 @@ The firmware fetches appointment pages from `CLOCK_SERVER_URL`.
 - The first server image appears next to the clock
 - Remaining images appear on later pages, two per page
 - After a successful fetch, later requests send `If-Modified-Since`
-- Each primary page request also carries optional `X-Memory-Clock-*` telemetry headers. Current
-  servers safely ignore them; a telemetry-aware server may record the latest battery voltage,
-  seconds since the last button press, Wi-Fi RSSI, and uptime.
+- Each primary page request also carries optional `X-Memory-Clock-*` telemetry headers. The server
+  keeps only the latest battery voltage, seconds since the last button press, Wi-Fi RSSI, uptime,
+  firmware version, and observation time for the authenticated clock.
 - If the server returns changed pages, the firmware replaces the in-memory pages and redraws page 1
 - If the server returns no images, the right widget says `No Appointments`
 - If the first fetch fails before any pages load, the right widget shows the logo and a server error
@@ -110,12 +110,20 @@ that device record.
 Run the server on the host:
 
 ```bash
+python3 server/create-admin-auth.py
 python3 server/clock_server.py \
   --host 0.0.0.0 \
   --port 8000 \
   --calendar server/local-data/calendar.yaml \
-  --devices server/local-data/devices.jsonl
+  --devices server/local-data/devices.jsonl \
+  --state server/local-data/memory-clock.sqlite3 \
+  --admin-token-hash-file server/local-secrets/admin-token.sha256 \
+  --allow-insecure-admin-cookie
 ```
+
+Then open `http://127.0.0.1:8000/memory-clock/admin/` and select
+`server/local-auth/admin.token` on the sign-in page. The insecure-cookie option is only for local
+HTTP testing; omit it behind the production HTTPS reverse proxy.
 
 Run the server in Docker:
 
@@ -124,6 +132,9 @@ docker build -t memory-clock-server server && \
 docker run --rm \
   -p 8000:8000 \
   -v "$PWD/server/local-data:/data:ro" \
+  -v "$PWD/server/local-state:/state" \
+  -v "$PWD/server/local-secrets/admin-token.sha256:/run/secrets/memory-clock-admin.sha256:ro" \
+  -e MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE=/run/secrets/memory-clock-admin.sha256 \
   memory-clock-server
 ```
 
