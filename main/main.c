@@ -298,18 +298,20 @@ void app_main(void)
 
     char ip_address[16];
     err = provisioning_start(ip_address, sizeof(ip_address));
-    if(err == ESP_OK) {
-        status_set_wifi_connected(true);
-        ESP_LOGI(TAG, "Wi-Fi connected: %s -> %s", provisioning_ssid(), ip_address);
-    } else {
+    if(err != ESP_OK) {
         banner_render_status(banner_buffer, sizeof(banner_buffer), "Failed",
                              provisioning_ssid());
         ESP_LOGE(TAG, "Wi-Fi connection failed for %s: %s",
                  provisioning_ssid(), esp_err_to_name(err));
         ESP_ERROR_CHECK(display_port_show_monochrome_full(banner_buffer, sizeof(banner_buffer),
                                                           BANNER_WIDTH, BANNER_HEIGHT));
-        return;
+        while(err != ESP_OK) {
+            ESP_LOGI(TAG, "waiting for Wi-Fi recovery on %s", provisioning_ssid());
+            err = provisioning_wait_for_connection(ip_address, sizeof(ip_address));
+        }
     }
+    status_set_wifi_connected(true);
+    ESP_LOGI(TAG, "Wi-Fi connected: %s -> %s", provisioning_ssid(), ip_address);
 
     banner_render_status(banner_buffer, sizeof(banner_buffer), "Syncing time",
                          MEMORY_CLOCK_TIME_SERVER);

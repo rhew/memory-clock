@@ -5,6 +5,7 @@ ESP-IDF firmware for the Seeed Studio reTerminal E1001 (`800x480`, ESP32-S3).
 Current firmware behavior:
 
 - Connects to Wi-Fi using `WIFI_SSID` and `WIFI_PASSWORD` from `env`
+- Reconnects with backoff after an outage and can select a different access point or channel
 - Syncs time from `TIME_SERVER` or `time.cloudflare.com` by default
 - Uses `TIME_ZONE` or New York Eastern time by default
 - Polls `CLOCK_SERVER_URL` for appointment page images
@@ -162,6 +163,9 @@ idf.py reconfigure
 idf.py build
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
+
+Starting the monitor normally resets the ESP32 through the serial DTR/RTS lines. To attach to a
+running clock without resetting it, use `idf.py monitor --no-reset`.
 
 Run `idf.py reconfigure` before rebuilding if you:
 
