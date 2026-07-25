@@ -921,7 +921,7 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error) as exc:
             print(f"admin client status failed: {exc}", flush=True)
             self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
-                           {"error": "client status is unavailable"})
+                           {"error": "Server could not load clock status."})
             return
 
         clients: list[dict[str, object]] = []

@@ -9,10 +9,7 @@
 <body>
   <main class="shell">
     <header class="masthead">
-      <div>
-        <p class="eyebrow">Memory Clock</p>
-        <h1>Admin</h1>
-      </div>
+      <h1 class="eyebrow masthead-title">Memory Clock Admin</h1>
       <button id="logout" class="quiet hidden" type="button">Sign out</button>
     </header>
 
@@ -33,25 +30,24 @@
     </section>
 
     <section id="admin-view" class="hidden">
-      <nav class="tabs" aria-label="Admin sections">
-        <button class="tab selected" data-view="clients" type="button">Clocks</button>
-        <button class="tab" data-view="pages" type="button">Pages</button>
-        <button class="tab" data-view="calendar" type="button">Calendar</button>
+      <nav class="tabs" aria-label="Admin sections" role="tablist">
+        <button id="clients-tab" class="tab selected" data-view="clients" type="button"
+                role="tab" aria-controls="clients-view" aria-selected="true"
+                tabindex="0">Clocks</button>
+        <button id="pages-tab" class="tab" data-view="pages" type="button"
+                role="tab" aria-controls="pages-view" aria-selected="false"
+                tabindex="-1">Pages</button>
+        <button id="calendar-tab" class="tab" data-view="calendar" type="button"
+                role="tab" aria-controls="calendar-view" aria-selected="false"
+                tabindex="-1">Calendar</button>
       </nav>
 
-      <section id="clients-view" class="view" aria-labelledby="clients-heading">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Current status</p>
-            <h2 id="clients-heading">Clocks</h2>
-          </div>
-          <button id="refresh" class="quiet" type="button">Refresh</button>
-        </div>
-        <p id="clients-updated" class="muted"></p>
+      <section id="clients-view" class="view" role="tabpanel" aria-labelledby="clients-tab">
         <div id="clients" class="client-grid" aria-live="polite"></div>
       </section>
 
-      <section id="pages-view" class="view hidden" aria-labelledby="pages-heading">
+      <section id="pages-view" class="view hidden" role="tabpanel"
+               aria-labelledby="pages-tab">
         <div class="section-heading">
           <div>
             <p class="eyebrow">Effective calendar</p>
@@ -62,7 +58,8 @@
         <div id="pages" class="page-grid" aria-live="polite"></div>
       </section>
 
-      <section id="calendar-view" class="view hidden" aria-labelledby="calendar-heading">
+      <section id="calendar-view" class="view hidden" role="tabpanel"
+               aria-labelledby="calendar-tab">
         <div class="section-heading">
           <div>
             <p class="eyebrow">Read-only source</p>

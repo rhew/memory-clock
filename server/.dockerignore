@@ -1,0 +1,8 @@
+admin.token
+calendar.yaml
+devices.jsonl
+local-data/
+local-state/
+*.sqlite3*
+__pycache__/
+*.pyc

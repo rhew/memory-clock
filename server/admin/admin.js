@@ -11,7 +11,6 @@ const tokenInput = document.querySelector("#admin-token");
 const fileInput = document.querySelector("#auth-file");
 const fileName = document.querySelector("#file-name");
 const clientsContainer = document.querySelector("#clients");
-const updatedLabel = document.querySelector("#clients-updated");
 const pagesContainer = document.querySelector("#pages");
 const calendarContainer = document.querySelector("#calendar");
 
@@ -38,11 +37,16 @@ function showAdmin() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(`${base}${path}`, {
-    credentials: "same-origin",
-    cache: "no-store",
-    ...options,
-  });
+  let response;
+  try {
+    response = await fetch(`${base}${path}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+      ...options,
+    });
+  } catch (_) {
+    throw new Error("Unable to contact the server.");
+  }
   if (response.status === 401) {
     showLogin("Your session has expired.");
     throw new Error("authentication required");
@@ -77,16 +81,6 @@ function exactTime(timestamp) {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-function duration(seconds) {
-  if (seconds === null || seconds === undefined) return "Unavailable";
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours}h ${minutes % 60}m`;
-  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
-}
-
 function element(name, className, text) {
   const node = document.createElement(name);
   if (className) node.className = className;
@@ -110,20 +104,18 @@ function renderClients() {
   for (const client of latestClients) {
     const card = element("article", "client-card");
     const title = element("div", "client-title");
-    title.append(element("h3", "", client.description));
-    const age = client.last_seen_at === null
-      ? null
-      : Math.max(0, Date.now() / 1000 - client.last_seen_at);
-    const badge = element(
-      "span",
-      age !== null && age <= 720 ? "badge recent" : "badge",
-      client.last_seen_at === null ? "Never seen" : (age <= 720 ? "Seen recently" : "Not recent"),
-    );
-    badge.title = "Recent means seen within the last 12 minutes.";
-    title.append(badge);
+    const heading = element("h3", "", client.description);
+    heading.append(" ", element("span", "device-id", `(${client.id})`));
+    title.append(heading);
     card.append(title);
 
     const facts = document.createElement("dl");
+    addFact(
+      facts,
+      "Last interaction",
+      humanAge(client.last_interaction_at),
+      client.last_interaction_at,
+    );
     addFact(facts, "Last seen", humanAge(client.last_seen_at), client.last_seen_at);
     addFact(facts, "Firmware", client.client_version || "Unavailable");
     addFact(
@@ -136,15 +128,8 @@ function renderClients() {
       "Wi-Fi",
       client.wifi_rssi === null ? "Unavailable" : `${client.wifi_rssi} dBm`,
     );
-    addFact(facts, "Uptime", duration(client.uptime_s));
     addFact(facts, "Started", humanAge(client.booted_at), client.booted_at);
-    addFact(
-      facts,
-      "Last interaction",
-      humanAge(client.last_interaction_at),
-      client.last_interaction_at,
-    );
-    card.append(facts, element("p", "device-id", client.id));
+    card.append(facts);
     clientsContainer.append(card);
   }
 }
@@ -155,8 +140,6 @@ async function loadClients() {
     const payload = await response.json();
     latestClients = payload.clients;
     renderClients();
-    updatedLabel.textContent = `Updated ${humanAge(payload.server_time)}`;
-    updatedLabel.title = exactTime(payload.server_time);
     adminError.textContent = "";
     showAdmin();
   } catch (error) {
@@ -209,7 +192,10 @@ async function loadCalendar() {
 async function selectView(name) {
   activeView = name;
   for (const button of document.querySelectorAll(".tab")) {
-    button.classList.toggle("selected", button.dataset.view === name);
+    const selected = button.dataset.view === name;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-selected", String(selected));
+    button.tabIndex = selected ? 0 : -1;
   }
   for (const view of document.querySelectorAll(".view")) {
     view.classList.toggle("hidden", view.id !== `${name}-view`);
@@ -276,9 +262,21 @@ logoutButton.addEventListener("click", async () => {
   showLogin();
 });
 
-document.querySelector("#refresh").addEventListener("click", loadClients);
 for (const button of document.querySelectorAll(".tab")) {
   button.addEventListener("click", () => selectView(button.dataset.view));
+  button.addEventListener("keydown", (event) => {
+    const tabs = [...document.querySelectorAll(".tab")];
+    const current = tabs.indexOf(button);
+    let next = null;
+    if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+    if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+    if (event.key === "Home") next = 0;
+    if (event.key === "End") next = tabs.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    tabs[next].focus();
+    selectView(tabs[next].dataset.view);
+  });
 }
 
 window.setInterval(() => {

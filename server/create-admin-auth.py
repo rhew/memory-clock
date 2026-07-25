@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_TOKEN_PATH = BASE_DIR / "local-auth" / "admin.token"
-DEFAULT_HASH_PATH = BASE_DIR / "local-secrets" / "admin-token.sha256"
+DEFAULT_TOKEN_PATH = BASE_DIR / "admin.token"
+DEFAULT_HASH_PATH = BASE_DIR / "local-data" / "admin-token.sha256"
 
 
 def write_secret(path: Path, value: str) -> None:

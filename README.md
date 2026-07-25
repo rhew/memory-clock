@@ -102,6 +102,7 @@ Put local server data under `server/local-data/`:
 ```text
 server/local-data/calendar.yaml
 server/local-data/devices.jsonl
+server/local-data/admin-token.sha256
 ```
 
 `server/local-data/` is ignored by git. Use your existing test bearer token in
@@ -118,12 +119,12 @@ python3 server/clock_server.py \
   --calendar server/local-data/calendar.yaml \
   --devices server/local-data/devices.jsonl \
   --state server/local-data/memory-clock.sqlite3 \
-  --admin-token-hash-file server/local-secrets/admin-token.sha256 \
+  --admin-token-hash-file server/local-data/admin-token.sha256 \
   --allow-insecure-admin-cookie
 ```
 
 Then open `http://127.0.0.1:8000/memory-clock/admin/` and select
-`server/local-auth/admin.token` on the sign-in page. The insecure-cookie option is only for local
+`server/admin.token` on the sign-in page. The insecure-cookie option is only for local
 HTTP testing; omit it behind the production HTTPS reverse proxy.
 
 Run the server in Docker:
@@ -134,8 +135,7 @@ docker run --rm \
   -p 8000:8000 \
   -v "$PWD/server/local-data:/data:ro" \
   -v "$PWD/server/local-state:/state" \
-  -v "$PWD/server/local-secrets/admin-token.sha256:/run/secrets/memory-clock-admin.sha256:ro" \
-  -e MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE=/run/secrets/memory-clock-admin.sha256 \
+  -e MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE=/data/admin-token.sha256 \
   memory-clock-server
 ```
 

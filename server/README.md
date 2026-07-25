@@ -63,14 +63,13 @@ read-only view of `calendar.yaml`. It never receives a device bearer token.
 Create the administrator's browser token and corresponding server-side hash:
 
 ```bash
-python3 create-admin-auth.py \
-  --token-file local-auth/admin.token \
-  --hash-file local-secrets/admin-token.sha256
+python3 create-admin-auth.py
 ```
 
 Both files are created with mode `0600` and existing files are never overwritten. Keep them
-private. Configure the server with the hash file and select `admin.token` on the browser sign-in
-page:
+private. The plaintext token is written to `admin.token` for selection on the browser sign-in
+page; its server-side hash is written to `local-data/admin-token.sha256`. Configure the server with
+the hash file:
 
 ```bash
 python3 clock_server.py \
@@ -78,7 +77,7 @@ python3 clock_server.py \
   --calendar local-data/calendar.yaml \
   --devices local-data/devices.jsonl \
   --state local-data/memory-clock.sqlite3 \
-  --admin-token-hash-file local-secrets/admin-token.sha256 \
+  --admin-token-hash-file local-data/admin-token.sha256 \
   --allow-insecure-admin-cookie
 ```
 
@@ -115,6 +114,7 @@ font family used for rendering. It expects:
 
 - `/data/calendar.yaml`
 - `/data/devices.jsonl`
+- `/data/admin-token.sha256` when the dashboard is enabled
 - a writable `/state` directory for `memory-clock.sqlite3`
 
 For an authenticated dashboard it also expects either the admin hash environment variable or a
@@ -141,9 +141,8 @@ Example `compose.yml` service:
     volumes:
       - ./memory-clock-data:/data:ro
       - ./memory-clock-state:/state
-      - ./memory-clock-secrets/admin-token.sha256:/run/secrets/memory-clock-admin.sha256:ro
     environment:
-      MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE: /run/secrets/memory-clock-admin.sha256
+      MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE: /data/admin-token.sha256
     networks:
       - reverse_proxy
     restart: unless-stopped
