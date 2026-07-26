@@ -1,0 +1,27 @@
+alerts:
+  - name: Beep
+    tones:
+      - frequency_hz: 1000
+        duration_ms: 100
+        gap_ms: 0
+
+  - name: Shave and a Haircut
+    tones:
+      - {frequency_hz: 1047, duration_ms: 283, gap_ms: 50}
+      - {frequency_hz: 784, duration_ms: 142, gap_ms: 25}
+      - {frequency_hz: 784, duration_ms: 142, gap_ms: 25}
+      - {frequency_hz: 880, duration_ms: 283, gap_ms: 50}
+      - {frequency_hz: 784, duration_ms: 333, gap_ms: 0}
+
+  - name: La Cucaracha
+    tones:
+      - {frequency_hz: 523, duration_ms: 160, gap_ms: 40}
+      - {frequency_hz: 523, duration_ms: 160, gap_ms: 40}
+      - {frequency_hz: 523, duration_ms: 160, gap_ms: 40}
+      - {frequency_hz: 698, duration_ms: 560, gap_ms: 40}
+      - {frequency_hz: 880, duration_ms: 360, gap_ms: 40}
+      - {frequency_hz: 523, duration_ms: 160, gap_ms: 40}
+      - {frequency_hz: 523, duration_ms: 160, gap_ms: 40}
+      - {frequency_hz: 523, duration_ms: 160, gap_ms: 40}
+      - {frequency_hz: 698, duration_ms: 560, gap_ms: 40}
+      - {frequency_hz: 880, duration_ms: 800, gap_ms: 0}

@@ -13,11 +13,25 @@ const fileName = document.querySelector("#file-name");
 const clientsContainer = document.querySelector("#clients");
 const pagesContainer = document.querySelector("#pages");
 const calendarContainer = document.querySelector("#calendar");
+const messageDialog = document.querySelector("#message-dialog");
+const messageDialogForm = document.querySelector("#message-dialog-form");
+const messageDialogHeading = document.querySelector("#message-dialog-heading");
+const messageDialogClose = document.querySelector("#message-dialog-close");
+const messageText = document.querySelector("#message-text");
+const messageClear = document.querySelector("#message-clear");
+const messageAlert = document.querySelector("#message-alert");
+const messageAlertError = document.querySelector("#message-alert-error");
+const messageDialogError = document.querySelector("#message-dialog-error");
+const messageRemove = document.querySelector("#message-remove");
+const messageSave = document.querySelector("#message-save");
 
 let selectedFileToken = "";
 let latestClients = [];
+let latestAlerts = [];
+let latestAlertsError = "";
 let activeView = "clients";
 let clientsRefreshTimer = null;
+let messageDialogClientId = null;
 
 function showLogin(message = "") {
   loginView.classList.remove("hidden");
@@ -95,6 +109,80 @@ function addFact(list, label, value, timestamp = null) {
   list.append(term, detail);
 }
 
+function messageStatus(message) {
+  if (!message) return { text: "No message", timestamp: null };
+  if (message.state === "dismissed") {
+    return { text: `Dismissed ${humanAge(message.dismissed_at)}`, timestamp: message.dismissed_at };
+  }
+  if (message.state === "displayed") {
+    return { text: `Displayed ${humanAge(message.displayed_at)}`, timestamp: message.displayed_at };
+  }
+  return { text: `Queued ${humanAge(message.queued_at)}`, timestamp: message.queued_at };
+}
+
+function populateAlertOptions(selectedName = null) {
+  messageAlert.replaceChildren();
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "None";
+  messageAlert.append(none);
+  for (const alertName of latestAlerts) {
+    const option = document.createElement("option");
+    option.value = alertName;
+    option.textContent = alertName;
+    messageAlert.append(option);
+  }
+  messageAlert.value = selectedName || "";
+  messageAlert.disabled = Boolean(latestAlertsError);
+  messageAlertError.textContent = latestAlertsError;
+}
+
+function openMessageDialog(client) {
+  messageDialogClientId = client.id;
+  messageDialogHeading.textContent = `Message for ${client.description}`;
+  messageText.value = client.message?.text || "";
+  messageClear.disabled = !messageText.value;
+  populateAlertOptions(client.message?.text ? client.message.alert : null);
+  messageDialogError.textContent = "";
+  messageRemove.classList.toggle("hidden", !client.message);
+  messageRemove.textContent = client.message?.text ? "Remove message" : "Remove record";
+  messageSave.textContent = client.message?.text ? "Replace message" : "Send message";
+  messageDialog.showModal();
+  messageText.focus();
+}
+
+function appendMessageSummary(card, client) {
+  const panel = element("section", "message-panel");
+  panel.append(element("h4", "", "Message"));
+  const row = element("div", "message-row");
+  const content = element("div", "message-content");
+  const message = client.message?.text;
+  content.append(element(
+    "p",
+    message ? "message-copy" : "message-copy message-empty",
+    message || (client.message ? "No active message" : "No message"),
+  ));
+  const status = messageStatus(client.message);
+  if (client.message) {
+    const statusText = client.message.alert
+      ? `${status.text} · ${client.message.alert} on refresh`
+      : status.text;
+    const statusNode = element("p", "message-status", statusText);
+    if (status.timestamp !== null) statusNode.title = exactTime(status.timestamp);
+    content.append(statusNode);
+  }
+  const manage = element(
+    "button",
+    "message-manage",
+    client.message?.text ? "Manage" : "Send message",
+  );
+  manage.type = "button";
+  manage.addEventListener("click", () => openMessageDialog(client));
+  row.append(content, manage);
+  panel.append(row);
+  card.append(panel);
+}
+
 function renderClients() {
   clientsContainer.replaceChildren();
   if (!latestClients.length) {
@@ -130,6 +218,7 @@ function renderClients() {
     );
     addFact(facts, "Started", humanAge(client.booted_at), client.booted_at);
     card.append(facts);
+    appendMessageSummary(card, client);
     clientsContainer.append(card);
   }
 }
@@ -139,6 +228,8 @@ async function loadClients() {
     const response = await api("/clients");
     const payload = await response.json();
     latestClients = payload.clients;
+    latestAlerts = payload.alerts || [];
+    latestAlertsError = payload.alerts_error || "";
     renderClients();
     adminError.textContent = "";
     showAdmin();
@@ -262,6 +353,71 @@ logoutButton.addEventListener("click", async () => {
   showLogin();
 });
 
+messageDialogClose.addEventListener("click", () => messageDialog.close());
+messageText.addEventListener("input", () => {
+  messageClear.disabled = !messageText.value;
+});
+messageClear.addEventListener("click", () => {
+  messageText.value = "";
+  messageClear.disabled = true;
+  messageText.focus();
+});
+
+messageDialog.addEventListener("close", () => {
+  messageDialogClientId = null;
+  messageDialogError.textContent = "";
+});
+
+messageDialogForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = messageText.value.trim();
+  if (!text || !messageDialogClientId) return;
+  messageSave.disabled = true;
+  messageRemove.disabled = true;
+  try {
+    await api("/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Memory-Clock-CSRF": "1",
+      },
+      body: JSON.stringify({
+        device_id: messageDialogClientId,
+        text,
+        alert: messageAlert.value || null,
+      }),
+    });
+    messageDialog.close();
+    adminError.textContent = "";
+    await loadClients();
+  } catch (error) {
+    messageDialogError.textContent = error.message;
+  } finally {
+    messageSave.disabled = false;
+    messageRemove.disabled = false;
+  }
+});
+
+messageRemove.addEventListener("click", async () => {
+  if (!messageDialogClientId) return;
+  messageSave.disabled = true;
+  messageRemove.disabled = true;
+  try {
+    await api(`/messages/${encodeURIComponent(messageDialogClientId)}`, {
+      method: "DELETE",
+      headers: { "X-Memory-Clock-CSRF": "1" },
+    });
+    messageDialog.close();
+    adminError.textContent = "";
+    await loadClients();
+  } catch (error) {
+    messageDialogError.textContent = error.message;
+  } finally {
+    messageSave.disabled = false;
+    messageRemove.disabled = false;
+  }
+});
+
 for (const button of document.querySelectorAll(".tab")) {
   button.addEventListener("click", () => selectView(button.dataset.view));
   button.addEventListener("keydown", (event) => {
@@ -280,7 +436,9 @@ for (const button of document.querySelectorAll(".tab")) {
 }
 
 window.setInterval(() => {
-  if (activeView === "clients" && latestClients.length) renderClients();
+  if (activeView === "clients" && latestClients.length) {
+    renderClients();
+  }
 }, 15000);
 
 loadClients();

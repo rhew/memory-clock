@@ -12,6 +12,7 @@
 #include "esp_log.h"
 #include "wifi_env.h"
 
+#include "clock_message.h"
 #include "image_store.h"
 
 static const char *TAG = "clock_client";
@@ -20,12 +21,17 @@ static const char *BATTERY_MV_HEADER = "X-Memory-Clock-Battery-Mv";
 static const char *LAST_INTERACTION_HEADER = "X-Memory-Clock-Last-Interaction-S";
 static const char *WIFI_RSSI_HEADER = "X-Memory-Clock-Wifi-Rssi";
 static const char *UPTIME_HEADER = "X-Memory-Clock-Uptime-S";
+static const char *MESSAGE_CAPABLE_HEADER = "X-Memory-Clock-Message-Capable";
+static const char *MESSAGE_ACTIVE_HEADER = "X-Memory-Clock-Message-Active";
+static const char *MESSAGE_DISPLAYED_HEADER = "X-Memory-Clock-Message-Displayed";
+static const char *MESSAGE_DISMISSED_HEADER = "X-Memory-Clock-Message-Dismissed";
 
 enum {
     HTTP_TIMEOUT_MS = 15000,
     MAX_RESPONSE_BYTES = 1024 * 1024,
     READ_BUFFER_SIZE = 2048,
     URL_BUFFER_SIZE = 256,
+    HTTP_TX_BUFFER_SIZE = 1024,
 };
 
 typedef struct {
@@ -61,6 +67,22 @@ static void set_telemetry_headers(esp_http_client_handle_t client,
         set_integer_header(client, WIFI_RSSI_HEADER, telemetry->wifi_rssi);
     }
     set_integer_header(client, UPTIME_HEADER, (int)telemetry->uptime_seconds);
+}
+
+static void set_message_headers(esp_http_client_handle_t client)
+{
+    esp_http_client_set_header(client, MESSAGE_CAPABLE_HEADER, "1");
+    clock_message_report_t report;
+    clock_message_report(&report);
+    if(report.active_id[0] != '\0') {
+        esp_http_client_set_header(client, MESSAGE_ACTIVE_HEADER, report.active_id);
+    }
+    if(report.displayed_id[0] != '\0') {
+        esp_http_client_set_header(client, MESSAGE_DISPLAYED_HEADER, report.displayed_id);
+    }
+    if(report.dismissed_id[0] != '\0') {
+        esp_http_client_set_header(client, MESSAGE_DISMISSED_HEADER, report.dismissed_id);
+    }
 }
 
 static void log_heap_state(const char *context)
@@ -366,6 +388,104 @@ static esp_err_t parse_images_json(const char *json, memory_clock_image_set_t *s
     return ESP_OK;
 }
 
+static bool parse_bounded_json_integer(cJSON *item, int minimum, int maximum,
+                                       uint16_t *value)
+{
+    if(!cJSON_IsNumber(item) || item->valuedouble != (double)item->valueint
+       || item->valueint < minimum || item->valueint > maximum) {
+        return false;
+    }
+    *value = (uint16_t)item->valueint;
+    return true;
+}
+
+static esp_err_t parse_alert_json(cJSON *message,
+                                  memory_clock_alert_sequence_t *alert)
+{
+    memset(alert, 0, sizeof(*alert));
+    cJSON *alert_item = cJSON_GetObjectItemCaseSensitive(message, "alert");
+    if(alert_item == NULL || cJSON_IsNull(alert_item)) return ESP_OK;
+    if(!cJSON_IsObject(alert_item)) return ESP_ERR_INVALID_RESPONSE;
+
+    cJSON *tones = cJSON_GetObjectItemCaseSensitive(alert_item, "tones");
+    int count = cJSON_IsArray(tones) ? cJSON_GetArraySize(tones) : 0;
+    if(count <= 0 || count > MEMORY_CLOCK_ALERT_MAX_TONES) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    uint32_t total_ms = 0;
+    for(int i = 0; i < count; ++i) {
+        cJSON *tone = cJSON_GetArrayItem(tones, i);
+        if(!cJSON_IsObject(tone)) return ESP_ERR_INVALID_RESPONSE;
+        memory_clock_alert_tone_t *parsed = &alert->tones[i];
+        if(!parse_bounded_json_integer(
+               cJSON_GetObjectItemCaseSensitive(tone, "frequency_hz"),
+               MEMORY_CLOCK_ALERT_MIN_FREQUENCY_HZ,
+               MEMORY_CLOCK_ALERT_MAX_FREQUENCY_HZ,
+               &parsed->frequency_hz)
+           || !parse_bounded_json_integer(
+               cJSON_GetObjectItemCaseSensitive(tone, "duration_ms"),
+               MEMORY_CLOCK_ALERT_MIN_DURATION_MS,
+               MEMORY_CLOCK_ALERT_MAX_DURATION_MS,
+               &parsed->duration_ms)
+           || !parse_bounded_json_integer(
+               cJSON_GetObjectItemCaseSensitive(tone, "gap_ms"),
+               0, MEMORY_CLOCK_ALERT_MAX_GAP_MS, &parsed->gap_ms)) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+        total_ms += parsed->duration_ms + parsed->gap_ms;
+        if(total_ms > MEMORY_CLOCK_ALERT_MAX_TOTAL_MS) {
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+    }
+    alert->count = (size_t)count;
+    return ESP_OK;
+}
+
+static esp_err_t parse_message_json(const char *json)
+{
+    cJSON *root = cJSON_Parse(json);
+    if(root == NULL) {
+        clock_message_cancel_active();
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+    if(message == NULL || cJSON_IsNull(message)) {
+        clock_message_cancel_active();
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+    if(!cJSON_IsObject(message)) {
+        clock_message_cancel_active();
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    cJSON *id = cJSON_GetObjectItemCaseSensitive(message, "id");
+    cJSON *text = cJSON_GetObjectItemCaseSensitive(message, "text");
+    if(!cJSON_IsString(id) || id->valuestring == NULL
+       || !cJSON_IsString(text) || text->valuestring == NULL) {
+        clock_message_cancel_active();
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    memory_clock_alert_sequence_t alert = {0};
+    esp_err_t alert_err = parse_alert_json(message, &alert);
+    if(alert_err != ESP_OK) {
+        ESP_LOGW(TAG, "ignored invalid alert for message %s: %s",
+                 id->valuestring, esp_err_to_name(alert_err));
+        memset(&alert, 0, sizeof(alert));
+    }
+    esp_err_t err = clock_message_receive(id->valuestring, text->valuestring, &alert);
+    if(err != ESP_OK) {
+        clock_message_cancel_active();
+    }
+    cJSON_Delete(root);
+    return err;
+}
+
 clock_client_result_t clock_client_poll(const clock_client_telemetry_t *telemetry)
 {
     http_response_t response = {0};
@@ -375,6 +495,7 @@ clock_client_result_t clock_client_poll(const clock_client_telemetry_t *telemetr
         .event_handler = http_event_handler,
         .user_data = &response,
         .crt_bundle_attach = esp_crt_bundle_attach,
+        .buffer_size_tx = HTTP_TX_BUFFER_SIZE,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -384,6 +505,7 @@ clock_client_result_t clock_client_poll(const clock_client_telemetry_t *telemetr
     esp_http_client_set_header(client, "Authorization", "Bearer " MEMORY_CLOCK_BEARER_TOKEN);
     esp_http_client_set_header(client, CLIENT_VERSION_HEADER, MEMORY_CLOCK_VERSION);
     set_telemetry_headers(client, telemetry);
+    set_message_headers(client);
     if(have_cached_images && cached_last_modified[0] != '\0') {
         esp_http_client_set_header(client, "If-Modified-Since", cached_last_modified);
     }
@@ -429,7 +551,14 @@ clock_client_result_t clock_client_poll(const clock_client_telemetry_t *telemetr
              status, (unsigned)response.length, content_length,
              response.last_modified[0] != '\0' ? response.last_modified : "(none)");
 
-    err = parse_images_json(response.data != NULL ? response.data : "", &replacement);
+    const char *response_json = response.data != NULL ? response.data : "";
+    esp_err_t message_err = parse_message_json(response_json);
+    if(message_err != ESP_OK) {
+        ESP_LOGW(TAG, "ignored invalid server message: %s",
+                 esp_err_to_name(message_err));
+    }
+
+    err = parse_images_json(response_json, &replacement);
     if(err != ESP_OK) {
         ESP_LOGW(TAG, "failed to parse server pages: %s", esp_err_to_name(err));
         image_store_mark_server_unavailable_if_empty();

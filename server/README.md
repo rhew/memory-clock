@@ -4,19 +4,23 @@
 - Requires `Authorization: Bearer <token>`
 - Hashes the bearer token and matches it against `server/devices.jsonl`
 - Reads `server/calendar.yaml`
+- Reads named alert sequences from the configured data directory
 - Sorts pages by date and drops entries before today
 - Renders each calendar entry to a `400x480` 1-bit image
 - Reloads `calendar.yaml` and `devices.jsonl` on each request
-- Supports `If-Modified-Since` and returns `304 Not Modified` when neither calendar changes nor date-driven rendering changes have occurred
+- Supports `If-Modified-Since` and returns `304 Not Modified` when neither calendar content nor a
+  message state change needs delivery to capable firmware
 - Treats server startup as a content change so devices refresh after a restart
 - Records one current status snapshot per authenticated clock poll in SQLite, including `304` polls
 - Serves an authenticated browser dashboard at `/memory-clock/admin/`
+- Queues one persistent message per configured clock
 
 Returns JSON with:
 - `tz`
 - `ntp`
 - `images` as XBM bit metadata with per-image raw bit paths
 - `device` description for the matched token
+- `message` containing an active message or `null`
 
 Response shape:
 
@@ -36,7 +40,16 @@ Response shape:
       "bits_path": "/memory-clock/images/page01.bin"
     }
   ],
-  "device": "memory-clock"
+  "device": "memory-clock",
+  "message": {
+    "id": "0123456789abcdef01234567",
+    "text": "Dinner is ready!",
+    "alert": {
+      "tones": [
+        {"frequency_hz": 1000, "duration_ms": 100, "gap_ms": 0}
+      ]
+    }
+  }
 }
 ```
 
@@ -49,13 +62,45 @@ firmware:
 - firmware version
 - battery voltage
 - Wi-Fi RSSI
-- uptime and estimated start time
+- estimated start time
 - last button-interaction time
+- current message state
 
 It does not retain telemetry history. Each poll atomically overwrites the device's single SQLite
 row, and rows for devices removed from `devices.jsonl` are pruned when the dashboard is loaded.
 Status recording is best-effort: an unavailable state database is logged but does not prevent a
 clock from receiving pages.
+
+Messages use one SQLite row per configured clock. Posting a new message replaces that row. The
+row progresses through `queued`, `displayed`, and `dismissed`; dismissal immediately removes the
+message text, so dismissed messages cannot be recalled. Messages are limited to 240 displayable
+ASCII characters and remain active until the clock's top green button clears them or an
+administrator removes them. Admin removal deletes the row and clears a displayed message on the
+clock's next poll. Firmware advertises support with
+`X-Memory-Clock-Message-Capable: 1`; queued messages do not force repeated responses to older
+firmware that lacks that header.
+
+The message dialog offers `None` by default plus the named sequences in `alerts.yaml`. When an
+alert is selected, the server validates and snapshots its tones into the message row. Later edits
+to the catalog therefore affect new messages without mutating an active one. Alert names identify
+the choices in the configuration and admin API. The clock
+safely replays its local snapshot after every regular server poll while the message remains
+active, including unsuccessful polls and `304 Not Modified` responses.
+
+Alert definitions contain a display name and up to 16 tones:
+
+```yaml
+alerts:
+  - name: Beep
+    tones:
+      - frequency_hz: 1000
+        duration_ms: 100
+        gap_ms: 0
+```
+
+Frequencies must be 500–3000 Hz, tone durations 20–1000 ms, gaps 0–1000 ms, and the complete
+sequence at most 5000 ms. `None` is built in and does not appear in the file. Copy
+`alerts.example.yaml` to `local-data/alerts.yaml` when setting up the server.
 
 The dashboard also provides authenticated previews of the effective appointment pages and a
 read-only view of `calendar.yaml`. It never receives a device bearer token.
@@ -76,6 +121,7 @@ python3 clock_server.py \
   --host 127.0.0.1 \
   --calendar local-data/calendar.yaml \
   --devices local-data/devices.jsonl \
+  --alerts local-data/alerts.yaml \
   --state local-data/memory-clock.sqlite3 \
   --admin-token-hash-file local-data/admin-token.sha256 \
   --allow-insecure-admin-cookie
@@ -91,6 +137,26 @@ For non-browser API access, send the admin token directly as a bearer token to t
 
 ```text
 Authorization: Bearer ma_...
+```
+
+Queue a message through the admin API:
+
+```bash
+curl -X POST https://example.test/memory-clock/admin/api/messages \
+  -H 'Authorization: Bearer ma_...' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Memory-Clock-CSRF: 1' \
+  --data '{"device_id":"kitchen-clock","text":"Dinner is ready!","alert":"Beep"}'
+```
+
+Use `"alert":null` or omit it for no sound.
+
+Remove a message or its dismissed-state record:
+
+```bash
+curl -X DELETE https://example.test/memory-clock/admin/api/messages/kitchen-clock \
+  -H 'Authorization: Bearer ma_...' \
+  -H 'X-Memory-Clock-CSRF: 1'
 ```
 
 The admin token is independent of all device tokens. The server may alternatively read the hash
@@ -114,8 +180,13 @@ font family used for rendering. It expects:
 
 - `/data/calendar.yaml`
 - `/data/devices.jsonl`
+- `/data/alerts.yaml`
 - `/data/admin-token.sha256` when the dashboard is enabled
 - a writable `/state` directory for `memory-clock.sqlite3`
+
+Put `alerts.yaml` in the mounted data directory. The image includes `alerts.example.yaml` as a
+starting point, but runtime alert configuration belongs under `/data` with the calendar, devices,
+and administrator-token hash.
 
 For an authenticated dashboard it also expects either the admin hash environment variable or a
 mounted hash file. The browser-facing `admin.token` file does not need to be mounted into the
@@ -143,6 +214,7 @@ Example `compose.yml` service:
       - ./memory-clock-state:/state
     environment:
       MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE: /data/admin-token.sha256
+      MEMORY_CLOCK_ALERTS_PATH: /data/alerts.yaml
     networks:
       - reverse_proxy
     restart: unless-stopped

@@ -72,6 +72,38 @@
       <p id="admin-error" class="error" role="alert"></p>
     </section>
   </main>
+
+  <dialog id="message-dialog" aria-labelledby="message-dialog-heading">
+    <form id="message-dialog-form">
+      <div class="dialog-heading">
+        <div>
+          <p class="eyebrow">Clock message</p>
+          <h2 id="message-dialog-heading">Message</h2>
+        </div>
+        <button id="message-dialog-close" class="quiet dialog-close" type="button"
+                aria-label="Close message dialog">Close</button>
+      </div>
+      <div class="message-field-heading">
+        <label for="message-text">Message</label>
+        <button id="message-clear" class="quiet text-clear" type="button">Clear</button>
+      </div>
+      <textarea id="message-text" name="text" maxlength="240" rows="4" required
+                placeholder="Type a short message"></textarea>
+      <p class="message-help">Up to 240 characters using basic letters, numbers, and punctuation.</p>
+      <label class="message-alert-option" for="message-alert">
+        <span>Alert sound</span>
+        <select id="message-alert" name="alert">
+          <option value="">None</option>
+        </select>
+      </label>
+      <p id="message-alert-error" class="error message-alert-error" role="status"></p>
+      <p id="message-dialog-error" class="error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="message-remove" class="danger hidden" type="button">Remove message</button>
+        <button id="message-save" class="primary dialog-primary" type="submit">Send message</button>
+      </div>
+    </form>
+  </dialog>
   <script src="admin.js" defer></script>
 </body>
 </html>

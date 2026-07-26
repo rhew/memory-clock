@@ -17,6 +17,7 @@ typedef struct {
 
 void banner_render_status(uint8_t *buffer, size_t buffer_size, const char *headline,
                           const char *detail);
+void banner_render_message(uint8_t *buffer, size_t buffer_size, const char *message);
 size_t banner_page_count(void);
 void banner_render_page(uint8_t *buffer, size_t buffer_size, size_t page_index,
                         const char *weekday, const char *daypart, int hour12,

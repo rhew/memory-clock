@@ -9,10 +9,11 @@ Current firmware behavior:
 - Syncs time from `TIME_SERVER` or `time.cloudflare.com` by default
 - Uses `TIME_ZONE` or New York Eastern time by default
 - Polls `CLOCK_SERVER_URL` for appointment page images
+- Displays persistent admin messages over the full screen
 - Renders a monochrome clock page with weekday, daypart, large 12-hour time, date, and the first appointment page
 - Renders additional appointment pages two images per page
 - Uses the left and right front buttons to change pages, with wraparound
-- Uses the top button to return to the first page
+- Uses the top green button to return to the first page or clear an admin message
 - Uses full refresh on page changes and 10-minute boundaries
 - Uses partial refresh for minute changes while the clock page is visible
 - Shows unobtrusive status icons at the bottom of the clock pane only when a problem exists:
@@ -84,6 +85,36 @@ The firmware fetches appointment pages from `CLOCK_SERVER_URL`.
 
 Use the left and right buttons to change the page. Use the top button to return to page 1.
 
+## Messages
+
+The admin dashboard can queue one message for a specific clock. The message arrives during the
+clock's existing server-poll cadence, covers the normal page, and remains until the top green
+button is pressed. Page buttons do not dismiss or obscure it.
+
+Each message can optionally select an alert sound defined by the server. The option defaults to
+`None`; the supplied catalog includes a 1 kHz beep, the five-note “Shave and a Haircut” call,
+and the first ten notes of “La Cucaracha.”
+The clock repeats the selected sequence after each regular server-poll cycle while the message
+remains active, including cycles that return `304 Not Modified`.
+
+The clock reports the message lifecycle as `queued`, `displayed`, and `dismissed`. A dismissed
+message's text is removed from the server database; only its identifier and timestamps remain
+until another message replaces the row. The clock stores the pending dismissed identifier in NVS
+so a power loss before the next poll cannot make a cleared message reappear.
+
+Message state is sent only to `CLOCK_SERVER_URL`:
+
+```text
+X-Memory-Clock-Message-Capable: 1
+X-Memory-Clock-Message-Active: 0123456789abcdef01234567
+X-Memory-Clock-Message-Displayed: 0123456789abcdef01234567
+X-Memory-Clock-Message-Dismissed: 0123456789abcdef01234567
+```
+
+The capability header lets the server leave older firmware on its normal `304 Not Modified`
+cadence instead of repeatedly sending a queued message it cannot display. Removing an active
+message in the admin dashboard causes capable firmware to clear it on its next poll.
+
 The telemetry headers are sent only to `CLOCK_SERVER_URL`, not image URLs:
 
 ```text
@@ -102,6 +133,7 @@ Put local server data under `server/local-data/`:
 ```text
 server/local-data/calendar.yaml
 server/local-data/devices.jsonl
+server/local-data/alerts.yaml
 server/local-data/admin-token.sha256
 ```
 
@@ -118,6 +150,7 @@ python3 server/clock_server.py \
   --port 8000 \
   --calendar server/local-data/calendar.yaml \
   --devices server/local-data/devices.jsonl \
+  --alerts server/local-data/alerts.yaml \
   --state server/local-data/memory-clock.sqlite3 \
   --admin-token-hash-file server/local-data/admin-token.sha256 \
   --allow-insecure-admin-cookie
@@ -136,6 +169,7 @@ docker run --rm \
   -v "$PWD/server/local-data:/data:ro" \
   -v "$PWD/server/local-state:/state" \
   -e MEMORY_CLOCK_ADMIN_TOKEN_HASH_FILE=/data/admin-token.sha256 \
+  -e MEMORY_CLOCK_ALERTS_PATH=/data/alerts.yaml \
   memory-clock-server
 ```
 

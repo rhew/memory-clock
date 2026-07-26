@@ -54,14 +54,24 @@ ADMIN_PATH = f"{BASE_PATH}/admin"
 ADMIN_API_PATH = f"{ADMIN_PATH}/api"
 ADMIN_COOKIE_NAME = "memory_clock_admin"
 CLIENT_VERSION_HEADER = "X-Memory-Clock-Version"
-TELEMETRY_HEADER_PREFIX = "x-memory-clock-"
+MESSAGE_CAPABLE_HEADER = "X-Memory-Clock-Message-Capable"
+MESSAGE_ACTIVE_HEADER = "X-Memory-Clock-Message-Active"
+MESSAGE_DISPLAYED_HEADER = "X-Memory-Clock-Message-Displayed"
+MESSAGE_DISMISSED_HEADER = "X-Memory-Clock-Message-Dismissed"
 
 ADMIN_SESSION_TTL_SECONDS = 12 * 60 * 60
 ADMIN_LOGIN_WINDOW_SECONDS = 5 * 60
 ADMIN_LOGIN_ATTEMPTS = 10
 MAX_ADMIN_LOGIN_BYTES = 4096
+MAX_ADMIN_MESSAGE_BYTES = 4096
 MAX_CALENDAR_SOURCE_BYTES = 1024 * 1024
 MAX_CLIENT_VERSION_LENGTH = 128
+MAX_MESSAGE_TEXT_LENGTH = 240
+MESSAGE_ID_PATTERN = re.compile(r"[0-9a-f]{24}")
+MESSAGE_CHARACTERS = frozenset(
+    " !\"#$%&'()*+,-./0123456789:;?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]"
+    "abcdefghijklmnopqrstuvwxyz\n"
+)
 
 TELEMETRY_HEADERS = {
     "x-memory-clock-battery-mv": ("battery", 2500, 5000),
@@ -73,8 +83,20 @@ TELEMETRY_HEADERS = {
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CALENDAR_PATH = BASE_DIR / "calendar.yaml"
 DEFAULT_DEVICES_PATH = BASE_DIR / "devices.jsonl"
+DEFAULT_ALERTS_PATH = BASE_DIR / "local-data" / "alerts.yaml"
+EXAMPLE_ALERTS_PATH = BASE_DIR / "alerts.example.yaml"
 DEFAULT_STATE_PATH = BASE_DIR / "local-data" / "memory-clock.sqlite3"
 DEFAULT_ADMIN_ASSETS_PATH = BASE_DIR / "admin"
+
+MAX_ALERT_COUNT = 16
+MAX_ALERT_NAME_LENGTH = 48
+MAX_ALERT_TONES = 16
+MIN_ALERT_FREQUENCY_HZ = 500
+MAX_ALERT_FREQUENCY_HZ = 3000
+MIN_ALERT_DURATION_MS = 20
+MAX_ALERT_DURATION_MS = 1000
+MAX_ALERT_GAP_MS = 1000
+MAX_ALERT_TOTAL_MS = 5000
 
 FONT_PATHS = {
     "regular": Path("/usr/share/fonts/truetype/lato/Lato-Regular.ttf"),
@@ -105,6 +127,19 @@ class Device:
     device_id: str
     description: str
     token_hash: str
+
+
+@dataclass(frozen=True)
+class AlertTone:
+    frequency_hz: int
+    duration_ms: int
+    gap_ms: int
+
+
+@dataclass(frozen=True)
+class AlertDefinition:
+    name: str
+    tones: tuple[AlertTone, ...]
 
 
 def load_font(kind: str, size: int) -> ImageFont.FreeTypeFont:
@@ -166,6 +201,104 @@ def legacy_device_id(token_hash: str) -> str:
 
 def valid_device_id(value: str) -> bool:
     return re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value) is not None
+
+
+def alert_integer(value: object, name: str, minimum: int, maximum: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    if value < minimum or value > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+def parse_alert_tones(value: object, source: str) -> tuple[AlertTone, ...]:
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_ALERT_TONES:
+        raise ValueError(f"{source} must define 1 to {MAX_ALERT_TONES} tones")
+    tones: list[AlertTone] = []
+    total_ms = 0
+    for index, raw_tone in enumerate(value, start=1):
+        if not isinstance(raw_tone, dict):
+            raise ValueError(f"{source} tone {index} must be an object")
+        frequency_hz = alert_integer(
+            raw_tone.get("frequency_hz"),
+            f"{source} tone {index} frequency_hz",
+            MIN_ALERT_FREQUENCY_HZ,
+            MAX_ALERT_FREQUENCY_HZ,
+        )
+        duration_ms = alert_integer(
+            raw_tone.get("duration_ms"),
+            f"{source} tone {index} duration_ms",
+            MIN_ALERT_DURATION_MS,
+            MAX_ALERT_DURATION_MS,
+        )
+        gap_ms = alert_integer(
+            raw_tone.get("gap_ms", 0),
+            f"{source} tone {index} gap_ms",
+            0,
+            MAX_ALERT_GAP_MS,
+        )
+        total_ms += duration_ms + gap_ms
+        if total_ms > MAX_ALERT_TOTAL_MS:
+            raise ValueError(
+                f"{source} must last at most {MAX_ALERT_TOTAL_MS} milliseconds"
+            )
+        tones.append(AlertTone(frequency_hz, duration_ms, gap_ms))
+    return tuple(tones)
+
+
+def load_alerts(path: Path) -> list[AlertDefinition]:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict) or not isinstance(raw.get("alerts"), list):
+        raise ValueError("alert file must contain an alerts list")
+    raw_alerts = raw["alerts"]
+    if len(raw_alerts) > MAX_ALERT_COUNT:
+        raise ValueError(f"alert file may define at most {MAX_ALERT_COUNT} alerts")
+
+    alerts: list[AlertDefinition] = []
+    seen_names: set[str] = set()
+    for index, raw_alert in enumerate(raw_alerts, start=1):
+        source = f"alert {index}"
+        if not isinstance(raw_alert, dict):
+            raise ValueError(f"{source} must be an object")
+        name = raw_alert.get("name")
+        if (not isinstance(name, str) or not name.strip()
+                or len(name.strip()) > MAX_ALERT_NAME_LENGTH
+                or not all(character.isprintable() for character in name.strip())):
+            raise ValueError(f"{source} has an invalid name")
+        name = name.strip()
+        normalized_name = name.casefold()
+        if normalized_name in seen_names:
+            raise ValueError(f"duplicate alert name: {name}")
+        tones = parse_alert_tones(raw_alert.get("tones"), source)
+        alerts.append(AlertDefinition(name, tones))
+        seen_names.add(normalized_name)
+    return alerts
+
+
+def alert_tones_payload(tones: tuple[AlertTone, ...]) -> list[dict[str, int]]:
+    return [
+        {
+            "frequency_hz": tone.frequency_hz,
+            "duration_ms": tone.duration_ms,
+            "gap_ms": tone.gap_ms,
+        }
+        for tone in tones
+    ]
+
+
+def stored_alert_payload(message: dict[str, object]) -> dict[str, object] | None:
+    tones_json = message.get("alert_tones")
+    if not isinstance(tones_json, str):
+        return None
+    alert_name = message.get("alert_name")
+    source = (
+        f"stored alert {alert_name}"
+        if isinstance(alert_name, str) else "stored alert"
+    )
+    tones = parse_alert_tones(json.loads(tones_json), source)
+    return {
+        "tones": alert_tones_payload(tones),
+    }
 
 
 def load_devices(path: Path) -> dict[str, Device]:
@@ -481,7 +614,7 @@ def telemetry_log_fields(headers) -> str:
     fields = [
         format_telemetry_header(name, value)
         for name, value in headers.items()
-        if name.lower().startswith(TELEMETRY_HEADER_PREFIX)
+        if name.lower() in TELEMETRY_HEADERS
     ]
     return "" if not fields else " telemetry=" + ",".join(fields)
 
@@ -501,6 +634,45 @@ def bounded_client_version(value: str) -> str | None:
     return value[:MAX_CLIENT_VERSION_LENGTH]
 
 
+def message_id_header(headers, name: str) -> str | None:
+    value = headers.get(name, "").strip().lower()
+    return value if MESSAGE_ID_PATTERN.fullmatch(value) else None
+
+
+def validate_message_text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("message must be text")
+    text = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        raise ValueError("message must not be empty")
+    if len(text) > MAX_MESSAGE_TEXT_LENGTH:
+        raise ValueError(f"message must be at most {MAX_MESSAGE_TEXT_LENGTH} characters")
+    unsupported = sorted({character for character in text
+                          if character not in MESSAGE_CHARACTERS})
+    if unsupported:
+        raise ValueError("message contains characters the clock cannot display")
+    return text
+
+
+def admin_message_payload(message: dict[str, object] | None) -> dict[str, object] | None:
+    if message is None:
+        return None
+    dismissed_at = message.get("dismissed_at")
+    displayed_at = message.get("displayed_at")
+    state = "dismissed" if dismissed_at is not None else (
+        "displayed" if displayed_at is not None else "queued"
+    )
+    return {
+        "id": message["message_id"],
+        "text": message.get("message_text"),
+        "alert": message.get("alert_name"),
+        "state": state,
+        "queued_at": message["queued_at"],
+        "displayed_at": displayed_at,
+        "dismissed_at": dismissed_at,
+    }
+
+
 class ClientStateStore:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -517,6 +689,20 @@ class ClientStateStore:
                     uptime_s INTEGER,
                     booted_at INTEGER,
                     last_interaction_at INTEGER
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS device_messages (
+                    device_id TEXT PRIMARY KEY,
+                    message_id TEXT NOT NULL,
+                    message_text TEXT,
+                    alert_name TEXT,
+                    alert_tones TEXT,
+                    queued_at INTEGER NOT NULL,
+                    displayed_at INTEGER,
+                    dismissed_at INTEGER
                 )
                 """
             )
@@ -570,6 +756,114 @@ class ClientStateStore:
                 ),
             )
 
+    def record_message_state(self, device_id: str, headers) -> None:
+        displayed_id = message_id_header(headers, MESSAGE_DISPLAYED_HEADER)
+        dismissed_id = message_id_header(headers, MESSAGE_DISMISSED_HEADER)
+        if displayed_id is None and dismissed_id is None:
+            return
+
+        observed_at = int(time.time())
+        with self.connect() as connection:
+            if displayed_id is not None:
+                connection.execute(
+                    """
+                    UPDATE device_messages
+                    SET displayed_at = COALESCE(displayed_at, ?)
+                    WHERE device_id = ? AND message_id = ? AND dismissed_at IS NULL
+                    """,
+                    (observed_at, device_id, displayed_id),
+                )
+            if dismissed_id is not None:
+                connection.execute(
+                    """
+                    UPDATE device_messages
+                    SET displayed_at = COALESCE(displayed_at, ?),
+                        dismissed_at = COALESCE(dismissed_at, ?),
+                        message_text = NULL,
+                        alert_name = NULL,
+                        alert_tones = NULL
+                    WHERE device_id = ? AND message_id = ?
+                    """,
+                    (observed_at, observed_at, device_id, dismissed_id),
+                )
+
+    def queue_message(self, device_id: str, text: str,
+                      alert: AlertDefinition | None) -> dict[str, object]:
+        message_id = secrets.token_hex(12)
+        queued_at = int(time.time())
+        alert_name = alert.name if alert is not None else None
+        alert_tones = (
+            json.dumps(alert_tones_payload(alert.tones), separators=(",", ":"))
+            if alert is not None else None
+        )
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO device_messages (
+                    device_id, message_id, message_text, alert_name,
+                    alert_tones, queued_at,
+                    displayed_at, dismissed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+                ON CONFLICT(device_id) DO UPDATE SET
+                    message_id = excluded.message_id,
+                    message_text = excluded.message_text,
+                    alert_name = excluded.alert_name,
+                    alert_tones = excluded.alert_tones,
+                    queued_at = excluded.queued_at,
+                    displayed_at = NULL,
+                    dismissed_at = NULL
+                """,
+                (
+                    device_id, message_id, text, alert_name,
+                    alert_tones, queued_at,
+                ),
+            )
+        return {
+            "device_id": device_id,
+            "message_id": message_id,
+            "message_text": text,
+            "alert_name": alert_name,
+            "alert_tones": alert_tones,
+            "queued_at": queued_at,
+            "displayed_at": None,
+            "dismissed_at": None,
+        }
+
+    def active_message(self, device_id: str) -> dict[str, object] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT device_id, message_id, message_text, alert_name,
+                       alert_tones, queued_at,
+                       displayed_at, dismissed_at
+                FROM device_messages
+                WHERE device_id = ? AND dismissed_at IS NULL
+                      AND message_text IS NOT NULL
+                """,
+                (device_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def remove_message(self, device_id: str) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM device_messages WHERE device_id = ?",
+                (device_id,),
+            )
+        return cursor.rowcount > 0
+
+    def messages_by_device(self) -> dict[str, dict[str, object]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT device_id, message_id, message_text, alert_name,
+                       alert_tones, queued_at,
+                       displayed_at, dismissed_at
+                FROM device_messages
+                """
+            ).fetchall()
+        return {str(row["device_id"]): dict(row) for row in rows}
+
     def status_by_device(self, active_device_ids: set[str]) -> dict[str, dict[str, object]]:
         with self.connect() as connection:
             if active_device_ids:
@@ -578,8 +872,13 @@ class ClientStateStore:
                     f"DELETE FROM client_status WHERE device_id NOT IN ({placeholders})",
                     tuple(sorted(active_device_ids)),
                 )
+                connection.execute(
+                    f"DELETE FROM device_messages WHERE device_id NOT IN ({placeholders})",
+                    tuple(sorted(active_device_ids)),
+                )
             else:
                 connection.execute("DELETE FROM client_status")
+                connection.execute("DELETE FROM device_messages")
             rows = connection.execute(
                 """
                 SELECT device_id, last_seen_at, client_version, battery_mv,
@@ -713,6 +1012,25 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
             print(f"status update failed for device={log_value(device.description)}: {exc}",
                   flush=True)
 
+    def record_client_message_state(self, device: Device) -> None:
+        if self.app.state_store is None:
+            return
+        try:
+            self.app.state_store.record_message_state(device.device_id, self.headers)
+        except (OSError, sqlite3.Error) as exc:
+            print(f"message state update failed for device={log_value(device.description)}: "
+                  f"{exc}", flush=True)
+
+    def active_message(self, device: Device) -> dict[str, object] | None:
+        if self.app.state_store is None:
+            return None
+        try:
+            return self.app.state_store.active_message(device.device_id)
+        except (OSError, sqlite3.Error) as exc:
+            print(f"message lookup failed for device={log_value(device.description)}: {exc}",
+                  flush=True)
+            return None
+
     def session_cookie_token(self) -> str | None:
         raw_cookie = self.headers.get("Cookie")
         if not raw_cookie:
@@ -766,10 +1084,28 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         if device is None:
             return
         self.record_client_status(device)
+        self.record_client_message_state(device)
+        active_message = self.active_message(device)
+        active_message_id = (
+            str(active_message["message_id"]) if active_message is not None else None
+        )
+        active_alert = None
+        if active_message is not None:
+            try:
+                active_alert = stored_alert_payload(active_message)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                print(f"stored alert is invalid for device={log_value(device.description)}: "
+                      f"{exc}", flush=True)
+        reported_active_id = message_id_header(self.headers, MESSAGE_ACTIVE_HEADER)
+        message_capable = self.headers.get(MESSAGE_CAPABLE_HEADER, "").strip() == "1"
+        message_needs_sync = (
+            message_capable and active_message_id != reported_active_id
+        )
 
         last_modified = self.app.effective_last_modified()
         if_modified_since = httpdate_to_timestamp(self.headers.get("If-Modified-Since", ""))
-        if if_modified_since is not None and last_modified <= if_modified_since:
+        if (not message_needs_sync and if_modified_since is not None
+                and last_modified <= if_modified_since):
             self.send_response(HTTPStatus.NOT_MODIFIED)
             self.send_header("Last-Modified", formatdate(last_modified, usegmt=True))
             self.end_headers()
@@ -778,6 +1114,14 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
 
         payload = build_payload(self.app.calendar_path)
         payload["device"] = device.description
+        payload["message"] = (
+            {
+                "id": active_message["message_id"],
+                "text": active_message["message_text"],
+                "alert": active_alert,
+            }
+            if message_capable and active_message is not None else None
+        )
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
         self.send_response(HTTPStatus.OK)
@@ -795,6 +1139,20 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
             return
         if path == f"{ADMIN_API_PATH}/logout":
             self.handle_admin_logout()
+            return
+        if path == f"{ADMIN_API_PATH}/messages":
+            self.handle_admin_message()
+            return
+        self.send_error(HTTPStatus.NOT_FOUND, "not found")
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        match = re.fullmatch(
+            re.escape(f"{ADMIN_API_PATH}/messages/") + r"([A-Za-z0-9_-]{1,64})",
+            path,
+        )
+        if match:
+            self.handle_admin_message_removal(match.group(1))
             return
         self.send_error(HTTPStatus.NOT_FOUND, "not found")
 
@@ -907,6 +1265,107 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
             cookie += "; Secure"
         self.send_json(HTTPStatus.OK, {"authenticated": False}, {"Set-Cookie": cookie})
 
+    def handle_admin_message(self) -> None:
+        if not self.require_admin():
+            return
+        if self.headers.get("X-Memory-Clock-CSRF") != "1":
+            self.send_json(HTTPStatus.FORBIDDEN, {"error": "missing CSRF header"})
+            return
+        if self.app.state_store is None:
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
+                           {"error": "clock message storage is unavailable"})
+            return
+
+        payload = self.read_json_body(MAX_ADMIN_MESSAGE_BYTES)
+        if payload is None:
+            return
+        device_id = payload.get("device_id")
+        if not isinstance(device_id, str) or not valid_device_id(device_id):
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid clock id"})
+            return
+        alert_name = payload.get("alert")
+        if alert_name is not None and (
+                not isinstance(alert_name, str) or not alert_name.strip()
+                or len(alert_name.strip()) > MAX_ALERT_NAME_LENGTH
+                or not all(character.isprintable()
+                           for character in alert_name.strip())):
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": "invalid alert name"})
+            return
+        if isinstance(alert_name, str):
+            alert_name = alert_name.strip()
+        try:
+            text = validate_message_text(payload.get("text"))
+        except ValueError as exc:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+            return
+        try:
+            devices = load_devices(self.app.devices_path)
+        except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
+            print(f"admin message clock configuration failed: {exc}", flush=True)
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
+                           {"error": "clock configuration is unavailable"})
+            return
+        if all(device.device_id != device_id for device in devices.values()):
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "clock not found"})
+            return
+
+        alert = None
+        if alert_name is not None:
+            try:
+                alerts = load_alerts(self.app.alerts_path)
+            except (OSError, ValueError, yaml.YAMLError) as exc:
+                print(f"admin alert configuration failed: {exc}", flush=True)
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
+                               {"error": "alert sounds are unavailable"})
+                return
+            alert = next(
+                (candidate for candidate in alerts if candidate.name == alert_name),
+                None,
+            )
+            if alert is None:
+                self.send_json(HTTPStatus.BAD_REQUEST, {"error": "unknown alert"})
+                return
+
+        try:
+            message = self.app.state_store.queue_message(device_id, text, alert)
+        except (OSError, sqlite3.Error) as exc:
+            print(f"admin message queue failed for device={log_value(device_id)}: {exc}",
+                  flush=True)
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
+                           {"error": "clock message storage is unavailable"})
+            return
+        self.send_json(HTTPStatus.CREATED, {"message": admin_message_payload(message)})
+
+    def handle_admin_message_removal(self, device_id: str) -> None:
+        if not self.require_admin():
+            return
+        if self.headers.get("X-Memory-Clock-CSRF") != "1":
+            self.send_json(HTTPStatus.FORBIDDEN, {"error": "missing CSRF header"})
+            return
+        if self.app.state_store is None:
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
+                           {"error": "clock message storage is unavailable"})
+            return
+        try:
+            devices = load_devices(self.app.devices_path)
+        except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
+            print(f"admin message removal validation failed: {exc}", flush=True)
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
+                           {"error": "clock configuration is unavailable"})
+            return
+        if all(device.device_id != device_id for device in devices.values()):
+            self.send_json(HTTPStatus.NOT_FOUND, {"error": "clock not found"})
+            return
+        try:
+            removed = self.app.state_store.remove_message(device_id)
+        except (OSError, sqlite3.Error) as exc:
+            print(f"admin message removal failed for device={log_value(device_id)}: {exc}",
+                  flush=True)
+            self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
+                           {"error": "clock message storage is unavailable"})
+            return
+        self.send_json(HTTPStatus.OK, {"removed": removed})
+
     def handle_admin_clients(self) -> None:
         if not self.require_admin():
             return
@@ -918,11 +1377,23 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
                 )
                 if self.app.state_store is not None else {}
             )
+            message_by_device = (
+                self.app.state_store.messages_by_device()
+                if self.app.state_store is not None else {}
+            )
         except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error) as exc:
             print(f"admin client status failed: {exc}", flush=True)
             self.send_json(HTTPStatus.SERVICE_UNAVAILABLE,
                            {"error": "Server could not load clock status."})
             return
+
+        alerts: list[AlertDefinition] = []
+        alerts_error = None
+        try:
+            alerts = load_alerts(self.app.alerts_path)
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            print(f"admin alert configuration failed: {exc}", flush=True)
+            alerts_error = "Alert sounds are unavailable."
 
         clients: list[dict[str, object]] = []
         for device in sorted(devices, key=lambda item: item.description.casefold()):
@@ -937,9 +1408,14 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
                 "uptime_s": status.get("uptime_s"),
                 "booted_at": status.get("booted_at"),
                 "last_interaction_at": status.get("last_interaction_at"),
+                "message": admin_message_payload(
+                    message_by_device.get(device.device_id)
+                ),
             })
         self.send_json(HTTPStatus.OK, {
             "server_time": int(time.time()),
+            "alerts": [alert.name for alert in alerts],
+            "alerts_error": alerts_error,
             "clients": clients,
         })
 
@@ -1023,13 +1499,14 @@ class ClockServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, server_address: tuple[str, int], calendar_path: Path,
-                 devices_path: Path, state_path: Path,
+                 devices_path: Path, alerts_path: Path, state_path: Path,
                  admin_token_hash: str | None,
                  admin_assets_path: Path = DEFAULT_ADMIN_ASSETS_PATH,
                  secure_admin_cookie: bool = True) -> None:
         super().__init__(server_address, ClockRequestHandler)
         self.calendar_path = calendar_path
         self.devices_path = devices_path
+        self.alerts_path = alerts_path
         self.admin_assets_path = admin_assets_path
         self.secure_admin_cookie = secure_admin_cookie
         self.admin_sessions = AdminSessions(admin_token_hash)
@@ -1076,12 +1553,17 @@ def resolve_admin_token_hash(args: argparse.Namespace) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve calendar pages for Memory Clock.")
+    alerts_default = Path(
+        os.environ.get("MEMORY_CLOCK_ALERTS_PATH", str(DEFAULT_ALERTS_PATH))
+    )
     parser.add_argument("--host", default="127.0.0.1", help="bind host, default: 127.0.0.1")
     parser.add_argument("--port", default=8000, type=int, help="bind port, default: 8000")
     parser.add_argument("--calendar", type=Path, default=DEFAULT_CALENDAR_PATH,
                         help=f"calendar YAML path, default: {DEFAULT_CALENDAR_PATH}")
     parser.add_argument("--devices", type=Path, default=DEFAULT_DEVICES_PATH,
                         help=f"device token file, default: {DEFAULT_DEVICES_PATH}")
+    parser.add_argument("--alerts", type=Path, default=alerts_default,
+                        help=f"alert tone YAML path, default: {alerts_default}")
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE_PATH,
                         help=f"SQLite state path, default: {DEFAULT_STATE_PATH}")
     parser.add_argument("--admin-token-hash-file", type=Path,
@@ -1103,6 +1585,7 @@ def main() -> int:
         (args.host, args.port),
         args.calendar.resolve(),
         args.devices.resolve(),
+        args.alerts.resolve(),
         args.state.resolve(),
         admin_token_hash,
         args.admin_assets.resolve(),
@@ -1111,6 +1594,7 @@ def main() -> int:
     print(f"Serving {BASE_PATH} on http://{args.host}:{args.port}{BASE_PATH}", flush=True)
     print(f"Calendar: {server.calendar_path}", flush=True)
     print(f"Devices: {server.devices_path}", flush=True)
+    print(f"Alerts: {server.alerts_path}", flush=True)
     print(f"State: {args.state.resolve()}", flush=True)
     if server.admin_sessions.enabled:
         print(f"Admin: http://{args.host}:{args.port}{ADMIN_PATH}/", flush=True)

@@ -42,7 +42,21 @@ enum {
     STATUS_ICON_SIZE = 32,
     STATUS_ICON_GAP = 10,
     STATUS_ICON_BOTTOM_MARGIN = 16,
+    MESSAGE_SIDE_MARGIN = 48,
+    MESSAGE_TEXT_WIDTH = BANNER_WIDTH - (MESSAGE_SIDE_MARGIN * 2),
+    MESSAGE_TEXT_TOP = 28,
+    MESSAGE_TEXT_BOTTOM = 406,
+    MESSAGE_INSTRUCTION_Y = 430,
+    MESSAGE_MAX_LINES = 8,
+    MESSAGE_BODY_MAX_LINES = 6,
+    MESSAGE_LINE_CAPACITY = 241,
 };
+
+typedef struct {
+    char lines[MESSAGE_MAX_LINES][MESSAGE_LINE_CAPACITY];
+    int count;
+    bool overflow;
+} message_lines_t;
 
 static void set_pixel(uint8_t *buffer, int x, int y, bool black)
 {
@@ -142,6 +156,99 @@ static void draw_text_centered_in_rect(uint8_t *buffer, const memory_clock_font_
     font_measure_text_bounds(font, 0, y, text, &bounds);
     int x = rect_x + (rect_width - bounds.width) / 2 - bounds.x;
     font_render_text(buffer, BANNER_WIDTH, BANNER_HEIGHT, font, x, y, text, true);
+}
+
+static void push_message_line(message_lines_t *wrapped, int max_lines, const char *line)
+{
+    if(wrapped->count >= max_lines) {
+        wrapped->overflow = true;
+        return;
+    }
+    strlcpy(wrapped->lines[wrapped->count], line, MESSAGE_LINE_CAPACITY);
+    ++wrapped->count;
+}
+
+static size_t last_space_index(const char *text)
+{
+    size_t result = SIZE_MAX;
+    for(size_t i = 0; text[i] != '\0'; ++i) {
+        if(text[i] == ' ') result = i;
+    }
+    return result;
+}
+
+static message_lines_t wrap_message(const memory_clock_font_t *font,
+                                    const char *message, int max_lines)
+{
+    message_lines_t wrapped = {0};
+    char line[MESSAGE_LINE_CAPACITY] = {0};
+    size_t line_length = 0;
+    size_t last_space = SIZE_MAX;
+
+    for(const char *cursor = message; ; ++cursor) {
+        char character = *cursor;
+        if(character == '\n' || character == '\0') {
+            while(line_length > 0 && line[line_length - 1] == ' ') {
+                line[--line_length] = '\0';
+            }
+            if(line_length > 0 || character == '\n') {
+                push_message_line(&wrapped, max_lines, line);
+            }
+            line[0] = '\0';
+            line_length = 0;
+            last_space = SIZE_MAX;
+            if(character == '\0' || wrapped.overflow) break;
+            continue;
+        }
+
+        if(line_length + 1 >= sizeof(line)) {
+            wrapped.overflow = true;
+            break;
+        }
+        line[line_length++] = character;
+        line[line_length] = '\0';
+        if(character == ' ') last_space = line_length - 1;
+
+        if(font_measure_text_width(font, line) <= MESSAGE_TEXT_WIDTH) continue;
+        if(last_space != SIZE_MAX) {
+            size_t remainder_start = last_space + 1;
+            while(remainder_start < line_length && line[remainder_start] == ' ') {
+                ++remainder_start;
+            }
+            line[last_space] = '\0';
+            push_message_line(&wrapped, max_lines, line);
+            if(wrapped.overflow) break;
+            size_t remainder_length = line_length - remainder_start;
+            memmove(line, line + remainder_start, remainder_length);
+            line[remainder_length] = '\0';
+            line_length = remainder_length;
+        } else if(line_length > 1) {
+            char remainder = line[line_length - 1];
+            line[line_length - 1] = '\0';
+            push_message_line(&wrapped, max_lines, line);
+            if(wrapped.overflow) break;
+            line[0] = remainder;
+            line[1] = '\0';
+            line_length = 1;
+        } else {
+            push_message_line(&wrapped, max_lines, line);
+            line[0] = '\0';
+            line_length = 0;
+        }
+        last_space = last_space_index(line);
+    }
+
+    if(wrapped.overflow && wrapped.count > 0) {
+        char *last = wrapped.lines[wrapped.count - 1];
+        size_t length = strlen(last);
+        while(length > 0
+              && font_measure_text_width(font, last)
+                     + font_measure_text_width(font, "...") > MESSAGE_TEXT_WIDTH) {
+            last[--length] = '\0';
+        }
+        strlcat(last, "...", MESSAGE_LINE_CAPACITY);
+    }
+    return wrapped;
 }
 
 static void draw_rounded_separator(uint8_t *buffer)
@@ -293,6 +400,32 @@ void banner_render_status(uint8_t *buffer, size_t buffer_size, const char *headl
     draw_text_centered(buffer, &memory_clock_font_body, STATUS_TITLE_Y, "Memory Clock");
     draw_text_centered(buffer, &memory_clock_font_ui_small, STATUS_HEADLINE_Y, headline);
     draw_text_centered(buffer, &memory_clock_font_ui_small, STATUS_DETAIL_Y, detail);
+}
+
+void banner_render_message(uint8_t *buffer, size_t buffer_size, const char *message)
+{
+    if(buffer_size < BANNER_BUFFER_SIZE || message == NULL) return;
+
+    clear_buffer(buffer, buffer_size);
+
+    const memory_clock_font_t *font = &memory_clock_font_body;
+    message_lines_t wrapped = wrap_message(font, message, MESSAGE_BODY_MAX_LINES);
+    if(wrapped.overflow) {
+        font = &memory_clock_font_ui_small;
+        wrapped = wrap_message(font, message, MESSAGE_MAX_LINES);
+    }
+
+    int line_height = font->line_height;
+    int block_height = wrapped.count * line_height;
+    int available_height = MESSAGE_TEXT_BOTTOM - MESSAGE_TEXT_TOP;
+    int y = MESSAGE_TEXT_TOP + (available_height - block_height) / 2;
+    for(int i = 0; i < wrapped.count; ++i) {
+        draw_text_centered_in_rect(buffer, font, MESSAGE_SIDE_MARGIN,
+                                   MESSAGE_TEXT_WIDTH, y, wrapped.lines[i]);
+        y += line_height;
+    }
+    draw_text_centered(buffer, &memory_clock_font_ui_small, MESSAGE_INSTRUCTION_Y,
+                       "Press green button to clear");
 }
 
 size_t banner_page_count(void)

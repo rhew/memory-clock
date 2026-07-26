@@ -60,7 +60,9 @@ Other button facts that matter:
 For this project:
 
 - use left and right for page navigation
-- leave the top button unused for now
+- use the top green button to return to page 1
+- while an admin message is displayed, use the top green button to dismiss it
+- messages can optionally repeat a server-defined buzzer sequence at the server-poll interval
 
 ## Wi-Fi
 
@@ -129,7 +131,7 @@ The E1001 includes other peripherals that this firmware does not use yet:
 These peripherals matter if this project grows into:
 
 - paged image/calendar content from SD
-- low-battery or alert UX using the buzzer/LED
+- low-battery or additional alert UX using the LED
 - environmental widgets
 - additional serial diagnostics
 
@@ -138,7 +140,6 @@ These peripherals matter if this project grows into:
 These hardware features are not wired into the app yet:
 
 - refresh button handling
-- buzzer
 - LEDs
 - sensors
 - microphone

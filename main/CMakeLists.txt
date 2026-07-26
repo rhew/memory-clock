@@ -138,7 +138,9 @@ configure_file("${CMAKE_CURRENT_LIST_DIR}/wifi_env.h.in"
 idf_component_register(
     SRCS
         "banner.c"
+        "buzzer.c"
         "clock_client.c"
+        "clock_message.c"
         "display_port.c"
         "font_assets.c"
         "font_render.c"

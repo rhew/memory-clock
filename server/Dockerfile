@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1
+ENV MEMORY_CLOCK_ALERTS_PATH=/data/alerts.yaml
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -12,6 +13,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY clock_server.py ./
+COPY alerts.example.yaml ./
 COPY admin ./admin
 
 EXPOSE 8000

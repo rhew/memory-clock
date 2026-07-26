@@ -13,7 +13,9 @@
 #include "freertos/task.h"
 
 #include "banner.h"
+#include "buzzer.h"
 #include "clock_client.h"
+#include "clock_message.h"
 #include "display_port.h"
 #include "image_store.h"
 #include "provisioning.h"
@@ -51,6 +53,7 @@ static volatile bool have_last_interaction;
 static portMUX_TYPE server_update_lock = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool pending_server_redraw;
 static volatile bool pending_server_reset_page;
+static bool buzzer_available;
 
 static void button_isr_handler(void *arg);
 static void server_poll_task(void *arg);
@@ -261,6 +264,7 @@ static void server_poll_task(void *arg)
         status_sample_battery();
         clock_client_telemetry_t telemetry = telemetry_snapshot();
         clock_client_result_t result = clock_client_poll(&telemetry);
+        bool message_changed = clock_message_take_changed();
         status_set_server_reachable(result != CLOCK_CLIENT_ERROR);
         image_store_status_t current_status = image_store_status();
         size_t current_count = image_store_count();
@@ -271,6 +275,22 @@ static void server_poll_task(void *arg)
         } else if(result == CLOCK_CLIENT_ERROR
                   && (current_status != previous_status || current_count != previous_count)) {
             publish_server_update(current_count == 0);
+        }
+        if(message_changed) {
+            publish_server_update(false);
+            ESP_LOGI(TAG, "server message updated; queued message redraw");
+        }
+        if(buzzer_available) {
+            memory_clock_alert_sequence_t alert;
+            if(clock_message_alert_snapshot(&alert)) {
+                esp_err_t alert_err = buzzer_play(&alert);
+                if(alert_err != ESP_OK) {
+                    ESP_LOGW(TAG, "message alert failed: %s",
+                             esp_err_to_name(alert_err));
+                }
+            } else {
+                buzzer_stop();
+            }
         }
 
         vTaskDelay(CLOCK_POLL_INTERVAL_TICKS);
@@ -287,7 +307,16 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
     timezone_init();
     ESP_ERROR_CHECK(image_store_init());
+    err = clock_message_init();
+    if(err != ESP_OK) {
+        ESP_LOGW(TAG, "messaging unavailable: %s", esp_err_to_name(err));
+    }
     ESP_ERROR_CHECK(status_init());
+    err = buzzer_init();
+    buzzer_available = err == ESP_OK;
+    if(!buzzer_available) {
+        ESP_LOGW(TAG, "buzzer unavailable: %s", esp_err_to_name(err));
+    }
     status_sample_battery();
     ESP_LOGI(TAG, "firmware version %s", MEMORY_CLOCK_VERSION);
 
@@ -334,6 +363,7 @@ void app_main(void)
     size_t page_count = banner_page_count();
     size_t current_page = 0;
     bool force_full_refresh = true;
+    bool message_was_active = false;
     banner_clock_layout_t clock_layout = {0};
     ESP_LOGI(TAG, "configured %u display page(s)", (unsigned)page_count);
     while(true) {
@@ -342,7 +372,7 @@ void app_main(void)
             if(reset_page) current_page = 0;
             page_count = banner_page_count();
             force_full_refresh = true;
-            ESP_LOGI(TAG, "server page state changed; redrawing page %u/%u",
+            ESP_LOGI(TAG, "server state changed; redrawing page %u/%u",
                      (unsigned)(current_page + 1), (unsigned)page_count);
         }
 
@@ -351,6 +381,47 @@ void app_main(void)
             current_page = 0;
             force_full_refresh = true;
         }
+
+        status_set_wifi_connected(provisioning_is_connected());
+        bool status_changed = status_take_changed();
+
+        char message_id[CLOCK_MESSAGE_ID_CAPACITY];
+        char message_text[CLOCK_MESSAGE_TEXT_CAPACITY];
+        bool message_active = clock_message_snapshot(
+            message_id, sizeof(message_id), message_text, sizeof(message_text));
+        if(message_active) {
+            int ignored_delta = buttons_take_pending_delta();
+            bool dismiss = buttons_take_pending_home();
+            if(dismiss) {
+                if(clock_message_dismiss(message_id)) {
+                    buzzer_stop();
+                    ESP_LOGI(TAG, "green button dismissed message %s", message_id);
+                }
+                message_was_active = false;
+                force_full_refresh = true;
+                continue;
+            }
+            if(ignored_delta != 0) {
+                ESP_LOGI(TAG, "page buttons ignored while message %s is displayed",
+                         message_id);
+            }
+            if(!message_was_active || force_full_refresh) {
+                banner_render_message(banner_buffer, sizeof(banner_buffer), message_text);
+                ESP_ERROR_CHECK(display_port_show_monochrome_full(
+                    banner_buffer, sizeof(banner_buffer), BANNER_WIDTH, BANNER_HEIGHT));
+                clock_message_mark_displayed(message_id);
+                force_full_refresh = false;
+                ESP_LOGI(TAG, "displayed message %s", message_id);
+            }
+            message_was_active = true;
+            vTaskDelay(pdMS_TO_TICKS(LOOP_POLL_MS));
+            continue;
+        }
+        if(message_was_active) {
+            message_was_active = false;
+            force_full_refresh = true;
+        }
+        if(status_changed) force_full_refresh = true;
 
         if(apply_pending_navigation(&current_page, page_count)) {
             force_full_refresh = true;
@@ -361,8 +432,6 @@ void app_main(void)
         localtime_r(&now, &tm_info);
 
         bool minute_changed = tm_info.tm_min != last_minute;
-        status_set_wifi_connected(provisioning_is_connected());
-        if(status_take_changed()) force_full_refresh = true;
         bool should_render = force_full_refresh || (current_page == 0 && minute_changed);
         if(should_render) {
             render_page_frame(current_page, &tm_info, &clock_layout);
