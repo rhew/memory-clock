@@ -5,7 +5,8 @@
 - Hashes the bearer token and matches it against `server/devices.jsonl`
 - Reads `server/calendar.yaml`
 - Reads named alert sequences from the configured data directory
-- Sorts pages by date and appointments by their 24-hour `HH:MM` start time
+- Sorts pages by date and appointments by a recognized start time, including `HH:MM`, `h:mm AM`,
+  and ranges such as `12:30 PM to 1:00 PM`, while preserving the original display text
 - Keeps today's page until one hour after its final appointment starts, then advances to the next
   appointment date; dates without appointments are skipped
 - Labels the next appointment date `Tomorrow` when it is the following day, or `Next Appointment`

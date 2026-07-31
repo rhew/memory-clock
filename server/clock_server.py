@@ -158,11 +158,35 @@ FONT_TITLE = load_font("semibold", 23)
 FONT_LOCATION = load_font("medium", 19)
 
 
-def parse_appointment_time(value: object) -> tuple[str, datetime_time]:
+def parse_appointment_time(value: object) -> tuple[str, datetime_time | None]:
     text = str(value).strip()
-    if re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", text) is None:
-        raise ValueError(f"appointment time must use 24-hour HH:MM format: {text!r}")
-    return text, datetime_time.fromisoformat(text)
+    match = re.match(
+        r"^(?P<hour>[0-9]{1,2})(?::(?P<minute>[0-9]{2}))?"
+        r"\s*(?P<meridiem>[AaPp][Mm])?(?:\b|(?=\s|[-–—]))",
+        text,
+    )
+    if match is None:
+        return text, None
+
+    hour = int(match.group("hour"))
+    minute_text = match.group("minute")
+    meridiem = match.group("meridiem")
+    if minute_text is None and meridiem is None:
+        return text, None
+    minute = int(minute_text or "0")
+    if minute > 59:
+        return text, None
+
+    if meridiem is not None:
+        if not 1 <= hour <= 12:
+            return text, None
+        hour %= 12
+        if meridiem.lower() == "pm":
+            hour += 12
+    elif hour > 23:
+        return text, None
+
+    return text, datetime_time(hour, minute)
 
 
 def calendar_pages_at(path: Path, now: datetime) -> tuple[list[CalendarPage], int]:
@@ -173,13 +197,14 @@ def calendar_pages_at(path: Path, now: datetime) -> tuple[list[CalendarPage], in
     today = now.date()
     pages: list[CalendarPage] = []
     today_starts: list[datetime_time] = []
+    today_has_unknown_start = False
     for entry in raw:
         when = date.fromisoformat(str(entry["date"]))
         if when < today:
             continue
 
         plan = str(entry.get("plan", "")).strip()
-        appointments_with_starts = []
+        appointments_with_starts: list[tuple[datetime_time | None, Appointment]] = []
         for item in entry.get("appointments", []):
             time_text, start = parse_appointment_time(item["time"])
             appointments_with_starts.append((
@@ -190,12 +215,18 @@ def calendar_pages_at(path: Path, now: datetime) -> tuple[list[CalendarPage], in
                     location=str(item["location"]).strip(),
                 ),
             ))
-        appointments_with_starts.sort(key=lambda item: item[0])
+        if all(item[0] is not None for item in appointments_with_starts):
+            appointments_with_starts.sort(key=lambda item: item[0] or datetime_time.min)
         appointments = tuple(item[1] for item in appointments_with_starts)
         if not appointments:
             continue
         if when == today:
-            today_starts.extend(item[0] for item in appointments_with_starts)
+            today_starts.extend(
+                item[0] for item in appointments_with_starts if item[0] is not None
+            )
+            today_has_unknown_start = today_has_unknown_start or any(
+                item[0] is None for item in appointments_with_starts
+            )
 
         label = when.strftime("%B ").replace(" 0", " ") + str(when.day)
         heading = "Today" if when == today else ""
@@ -207,7 +238,7 @@ def calendar_pages_at(path: Path, now: datetime) -> tuple[list[CalendarPage], in
 
     start_of_today = datetime.combine(today, datetime_time.min, DISPLAY_TIMEZONE)
     display_changed_at = start_of_today
-    if today_starts:
+    if today_starts and not today_has_unknown_start:
         last_start = datetime.combine(today, max(today_starts), DISPLAY_TIMEZONE)
         start_of_tomorrow = start_of_today + timedelta(days=1)
         cutoff = min(last_start + APPOINTMENT_DISPLAY_GRACE, start_of_tomorrow)

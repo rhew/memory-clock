@@ -23,7 +23,7 @@ class CalendarPresentationTest(unittest.TestCase):
             "- date: 2026-07-31\n"
             "  plan: Today's plan\n"
             "  appointments:\n"
-            "    - time: '14:00'\n"
+            "    - time: '2:00 PM to 3:00 PM'\n"
             "      title: Afternoon appointment\n"
             "      location: Second room\n"
             "    - time: '09:00'\n"
@@ -52,7 +52,7 @@ class CalendarPresentationTest(unittest.TestCase):
                          ["2026-07-31", "2026-08-01"])
         self.assertEqual(pages[0].heading, "Today")
         self.assertEqual([appointment.time for appointment in pages[0].appointments],
-                         ["09:00", "14:00"])
+                         ["09:00", "2:00 PM to 3:00 PM"])
 
     def test_today_expires_at_one_hour_after_last_appointment(self) -> None:
         pages = clock_server.parse_calendar(self.calendar_path, self.local_time(15, 0))
@@ -117,19 +117,37 @@ class CalendarPresentationTest(unittest.TestCase):
         self.assertEqual([page.when.isoformat() for page in pages], ["2026-08-02"])
         self.assertEqual(pages[0].heading, "Next Appointment")
 
-    def test_appointment_times_require_24_hour_format(self) -> None:
+    def test_unknown_time_keeps_today_visible(self) -> None:
         self.calendar_path.write_text(
             "- date: 2026-07-31\n"
             "  plan: Today's plan\n"
             "  appointments:\n"
-            "    - time: '9:00'\n"
-            "      title: Invalid time\n"
+            "    - time: 'After lunch'\n"
+            "      title: Appointment without a numeric time\n"
             "      location: First room\n",
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(ValueError, "24-hour HH:MM"):
-            clock_server.parse_calendar(self.calendar_path, self.local_time(8, 0))
+        pages = clock_server.parse_calendar(self.calendar_path, self.local_time(23, 0))
+
+        self.assertEqual([page.when.isoformat() for page in pages], ["2026-07-31"])
+        self.assertEqual(pages[0].appointments[0].time, "After lunch")
+
+    def test_parses_common_start_time_formats(self) -> None:
+        expected = {
+            "09:30": datetime_time(9, 30),
+            "9:30": datetime_time(9, 30),
+            "9:30 AM": datetime_time(9, 30),
+            "12:30 PM to 1:00 PM": datetime_time(12, 30),
+            "12 AM": datetime_time(0, 0),
+            "12 PM": datetime_time(12, 0),
+        }
+
+        for text, start in expected.items():
+            with self.subTest(text=text):
+                display_text, parsed_start = clock_server.parse_appointment_time(text)
+                self.assertEqual(display_text, text)
+                self.assertEqual(parsed_start, start)
 
 
 class ClockServerIntegrationTest(unittest.TestCase):
