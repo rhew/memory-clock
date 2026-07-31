@@ -15,7 +15,7 @@ import threading
 import time
 from http.cookies import SimpleCookie
 from dataclasses import dataclass
-from datetime import date, datetime, time as datetime_time, timezone
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from email.utils import formatdate, parsedate_to_datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -44,6 +44,7 @@ APPOINTMENTS_TOP = 8
 APPOINTMENT_GAP = 8
 SECTION_GAP = 1
 NEXT_HEADING_GAP = 20
+APPOINTMENT_DISPLAY_GRACE = timedelta(hours=1)
 
 STATIC_TZ = "EST5EDT,M3.2.0/2,M11.1.0/2"
 STATIC_NTP = "time.cloudflare.com"
@@ -157,24 +158,45 @@ FONT_TITLE = load_font("semibold", 23)
 FONT_LOCATION = load_font("medium", 19)
 
 
-def parse_calendar(path: Path) -> list[CalendarPage]:
+def parse_appointment_time(value: object) -> tuple[str, datetime_time]:
+    text = str(value).strip()
+    if re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", text) is None:
+        raise ValueError(f"appointment time must use 24-hour HH:MM format: {text!r}")
+    return text, datetime_time.fromisoformat(text)
+
+
+def calendar_pages_at(path: Path, now: datetime) -> tuple[list[CalendarPage], int]:
+    if now.tzinfo is None:
+        raise ValueError("calendar time must include a timezone")
+    now = now.astimezone(DISPLAY_TIMEZONE)
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
-    today = datetime.now(DISPLAY_TIMEZONE).date()
+    today = now.date()
     pages: list[CalendarPage] = []
+    today_starts: list[datetime_time] = []
     for entry in raw:
         when = date.fromisoformat(str(entry["date"]))
         if when < today:
             continue
 
         plan = str(entry.get("plan", "")).strip()
-        appointments = tuple(
-            Appointment(
-                time=str(item["time"]).strip(),
-                title=str(item["title"]).strip(),
-                location=str(item["location"]).strip(),
-            )
-            for item in entry.get("appointments", [])
-        )
+        appointments_with_starts = []
+        for item in entry.get("appointments", []):
+            time_text, start = parse_appointment_time(item["time"])
+            appointments_with_starts.append((
+                start,
+                Appointment(
+                    time=time_text,
+                    title=str(item["title"]).strip(),
+                    location=str(item["location"]).strip(),
+                ),
+            ))
+        appointments_with_starts.sort(key=lambda item: item[0])
+        appointments = tuple(item[1] for item in appointments_with_starts)
+        if not appointments:
+            continue
+        if when == today:
+            today_starts.extend(item[0] for item in appointments_with_starts)
+
         label = when.strftime("%B ").replace(" 0", " ") + str(when.day)
         heading = "Today" if when == today else ""
         pages.append(
@@ -182,16 +204,45 @@ def parse_calendar(path: Path) -> list[CalendarPage]:
                          appointments=appointments, heading=heading)
         )
     pages.sort(key=lambda page: page.when)
+
+    start_of_today = datetime.combine(today, datetime_time.min, DISPLAY_TIMEZONE)
+    display_changed_at = start_of_today
+    if today_starts:
+        last_start = datetime.combine(today, max(today_starts), DISPLAY_TIMEZONE)
+        start_of_tomorrow = start_of_today + timedelta(days=1)
+        cutoff = min(last_start + APPOINTMENT_DISPLAY_GRACE, start_of_tomorrow)
+        if now >= cutoff:
+            pages = [page for page in pages if page.when != today]
+            display_changed_at = cutoff
+
     if pages and pages[0].heading == "":
         first_page = pages[0]
+        heading = (
+            "Tomorrow"
+            if first_page.when == today + timedelta(days=1)
+            else "Next Appointment"
+        )
         pages[0] = CalendarPage(
             when=first_page.when,
             label=first_page.label,
             plan=first_page.plan,
             appointments=first_page.appointments,
-            heading="Next Appointment",
+            heading=heading,
         )
+    return pages, int(display_changed_at.astimezone(timezone.utc).timestamp())
+
+
+def parse_calendar(path: Path, now: datetime | None = None) -> list[CalendarPage]:
+    pages, _ = calendar_pages_at(path, now or datetime.now(DISPLAY_TIMEZONE))
     return pages
+
+
+def calendar_display_timestamp(path: Path, now: datetime | None = None) -> int:
+    _, display_changed_at = calendar_pages_at(
+        path,
+        now or datetime.now(DISPLAY_TIMEZONE),
+    )
+    return display_changed_at
 
 
 def legacy_device_id(token_hash: str) -> str:
@@ -358,8 +409,11 @@ def path_fingerprint(path: Path) -> str:
         return "unreadable"
 
 
-def effective_last_modified(calendar_changed_at: int) -> int:
-    return max(calendar_changed_at, start_of_today_timestamp())
+def effective_last_modified(calendar_changed_at: int,
+                            display_changed_at: int | None = None) -> int:
+    if display_changed_at is None:
+        display_changed_at = start_of_today_timestamp()
+    return max(calendar_changed_at, display_changed_at)
 
 
 def wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont,
@@ -1526,7 +1580,8 @@ class ClockServer(ThreadingHTTPServer):
                 self.calendar_fingerprint = fingerprint
                 now = int(datetime.now(timezone.utc).timestamp())
                 self.calendar_changed_at = max(now, self.calendar_changed_at + 1)
-            return effective_last_modified(self.calendar_changed_at)
+            display_changed_at = calendar_display_timestamp(self.calendar_path)
+            return effective_last_modified(self.calendar_changed_at, display_changed_at)
 
 
 def validate_sha256(value: str, source: str) -> str:

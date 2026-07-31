@@ -9,10 +9,127 @@ import sys
 import tempfile
 import threading
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 
 import clock_server
+
+
+class CalendarPresentationTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.calendar_path = Path(self.temporary_directory.name) / "calendar.yaml"
+        self.calendar_path.write_text(
+            "- date: 2026-07-31\n"
+            "  plan: Today's plan\n"
+            "  appointments:\n"
+            "    - time: '14:00'\n"
+            "      title: Afternoon appointment\n"
+            "      location: Second room\n"
+            "    - time: '09:00'\n"
+            "      title: Morning appointment\n"
+            "      location: First room\n"
+            "- date: 2026-08-01\n"
+            "  plan: Tomorrow's plan\n"
+            "  appointments:\n"
+            "    - time: '10:30'\n"
+            "      title: Tomorrow's appointment\n"
+            "      location: Third room\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self) -> None:
+        self.temporary_directory.cleanup()
+
+    def local_time(self, hour: int, minute: int) -> datetime:
+        return datetime(2026, 7, 31, hour, minute,
+                        tzinfo=clock_server.DISPLAY_TIMEZONE)
+
+    def test_today_remains_until_one_hour_after_last_appointment(self) -> None:
+        pages = clock_server.parse_calendar(self.calendar_path, self.local_time(14, 59))
+
+        self.assertEqual([page.when.isoformat() for page in pages],
+                         ["2026-07-31", "2026-08-01"])
+        self.assertEqual(pages[0].heading, "Today")
+        self.assertEqual([appointment.time for appointment in pages[0].appointments],
+                         ["09:00", "14:00"])
+
+    def test_today_expires_at_one_hour_after_last_appointment(self) -> None:
+        pages = clock_server.parse_calendar(self.calendar_path, self.local_time(15, 0))
+
+        self.assertEqual([page.when.isoformat() for page in pages], ["2026-08-01"])
+        self.assertEqual(pages[0].heading, "Tomorrow")
+
+    def test_later_appointment_keeps_today_after_earlier_appointment(self) -> None:
+        pages = clock_server.parse_calendar(self.calendar_path, self.local_time(11, 0))
+
+        self.assertEqual(pages[0].when.isoformat(), "2026-07-31")
+        self.assertEqual(pages[0].heading, "Today")
+
+    def test_display_timestamp_advances_at_appointment_cutoff(self) -> None:
+        before = clock_server.calendar_display_timestamp(
+            self.calendar_path, self.local_time(14, 59)
+        )
+        after = clock_server.calendar_display_timestamp(
+            self.calendar_path, self.local_time(15, 0)
+        )
+        expected_before = datetime.combine(
+            date(2026, 7, 31), datetime_time.min, clock_server.DISPLAY_TIMEZONE
+        )
+        expected_after = self.local_time(15, 0)
+
+        self.assertEqual(before, int(expected_before.astimezone(timezone.utc).timestamp()))
+        self.assertEqual(after, int(expected_after.astimezone(timezone.utc).timestamp()))
+        self.assertGreater(after, before)
+
+    def test_days_without_appointments_are_skipped(self) -> None:
+        self.calendar_path.write_text(
+            "- date: 2026-07-31\n"
+            "  plan: No appointments today\n"
+            "  appointments: []\n"
+            "- date: 2026-08-01\n"
+            "  plan: Tomorrow's plan\n"
+            "  appointments:\n"
+            "    - time: '10:30'\n"
+            "      title: Tomorrow's appointment\n"
+            "      location: Third room\n",
+            encoding="utf-8",
+        )
+
+        pages = clock_server.parse_calendar(self.calendar_path, self.local_time(8, 0))
+
+        self.assertEqual([page.when.isoformat() for page in pages], ["2026-08-01"])
+        self.assertEqual(pages[0].heading, "Tomorrow")
+
+    def test_later_dates_use_next_appointment_heading(self) -> None:
+        self.calendar_path.write_text(
+            "- date: 2026-08-02\n"
+            "  plan: A later plan\n"
+            "  appointments:\n"
+            "    - time: '10:30'\n"
+            "      title: Later appointment\n"
+            "      location: Third room\n",
+            encoding="utf-8",
+        )
+
+        pages = clock_server.parse_calendar(self.calendar_path, self.local_time(8, 0))
+
+        self.assertEqual([page.when.isoformat() for page in pages], ["2026-08-02"])
+        self.assertEqual(pages[0].heading, "Next Appointment")
+
+    def test_appointment_times_require_24_hour_format(self) -> None:
+        self.calendar_path.write_text(
+            "- date: 2026-07-31\n"
+            "  plan: Today's plan\n"
+            "  appointments:\n"
+            "    - time: '9:00'\n"
+            "      title: Invalid time\n"
+            "      location: First room\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(ValueError, "24-hour HH:MM"):
+            clock_server.parse_calendar(self.calendar_path, self.local_time(8, 0))
 
 
 class ClockServerIntegrationTest(unittest.TestCase):

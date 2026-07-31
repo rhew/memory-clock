@@ -5,11 +5,16 @@
 - Hashes the bearer token and matches it against `server/devices.jsonl`
 - Reads `server/calendar.yaml`
 - Reads named alert sequences from the configured data directory
-- Sorts pages by date and drops entries before today
+- Sorts pages by date and appointments by their 24-hour `HH:MM` start time
+- Keeps today's page until one hour after its final appointment starts, then advances to the next
+  appointment date; dates without appointments are skipped
+- Labels the next appointment date `Tomorrow` when it is the following day, or `Next Appointment`
+  when it is farther away
 - Renders each calendar entry to a `400x480` 1-bit image
 - Reloads `calendar.yaml` and `devices.jsonl` on each request
 - Supports `If-Modified-Since` and returns `304 Not Modified` when neither calendar content nor a
   message state change needs delivery to capable firmware
+- Advances `Last-Modified` at the daily appointment cutoff so polling clocks refresh the home page
 - Treats server startup as a content change so devices refresh after a restart
 - Records one current status snapshot per authenticated clock poll in SQLite, including `304` polls
 - Serves an authenticated browser dashboard at `/memory-clock/admin/`
