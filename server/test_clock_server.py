@@ -299,6 +299,25 @@ class ClockServerIntegrationTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("default-src 'none'", headers["content-security-policy"])
         self.assertIn(b"Choose auth file", body)
+        self.assertIn(b'href="favicon.svg"', body)
+        self.assertIn(b'href="manifest.webmanifest"', body)
+
+        expected_assets = {
+            "favicon.svg": ("image/svg+xml", b"<svg"),
+            "favicon-32.png": ("image/png", b"\x89PNG\r\n\x1a\n"),
+            "apple-touch-icon.png": ("image/png", b"\x89PNG\r\n\x1a\n"),
+            "icon-192.png": ("image/png", b"\x89PNG\r\n\x1a\n"),
+            "icon-512.png": ("image/png", b"\x89PNG\r\n\x1a\n"),
+            "manifest.webmanifest": ("application/manifest+json", b"{"),
+        }
+        for name, (content_type, prefix) in expected_assets.items():
+            with self.subTest(asset=name):
+                status, headers, body = self.request(
+                    "GET", f"/memory-clock/admin/{name}"
+                )
+                self.assertEqual(status, 200)
+                self.assertEqual(headers["content-type"], content_type)
+                self.assertTrue(body.startswith(prefix))
 
     def test_message_lifecycle(self) -> None:
         device_headers = {

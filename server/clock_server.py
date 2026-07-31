@@ -1245,11 +1245,19 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         if path == f"{ADMIN_PATH}/":
             self.serve_admin_asset("index.html", "text/html; charset=utf-8")
             return
-        if path == f"{ADMIN_PATH}/admin.css":
-            self.serve_admin_asset("admin.css", "text/css; charset=utf-8")
-            return
-        if path == f"{ADMIN_PATH}/admin.js":
-            self.serve_admin_asset("admin.js", "text/javascript; charset=utf-8")
+        admin_assets = {
+            "admin.css": "text/css; charset=utf-8",
+            "admin.js": "text/javascript; charset=utf-8",
+            "favicon.svg": "image/svg+xml",
+            "favicon-32.png": "image/png",
+            "apple-touch-icon.png": "image/png",
+            "icon-192.png": "image/png",
+            "icon-512.png": "image/png",
+            "manifest.webmanifest": "application/manifest+json",
+        }
+        asset_name = path.removeprefix(f"{ADMIN_PATH}/")
+        if asset_name in admin_assets:
+            self.serve_admin_asset(asset_name, admin_assets[asset_name])
             return
         if path == f"{ADMIN_API_PATH}/clients":
             self.handle_admin_clients()
@@ -1276,7 +1284,8 @@ class ClockRequestHandler(BaseHTTPRequestHandler):
         headers = {
             "Content-Security-Policy": (
                 "default-src 'none'; script-src 'self'; style-src 'self'; "
-                "img-src 'self'; connect-src 'self'; frame-ancestors 'none'; "
+                "img-src 'self'; connect-src 'self'; manifest-src 'self'; "
+                "frame-ancestors 'none'; "
                 "base-uri 'none'; form-action 'self'"
             ),
             "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
