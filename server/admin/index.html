@@ -39,7 +39,7 @@
                 tabindex="-1">Pages</button>
         <button id="calendar-tab" class="tab" data-view="calendar" type="button"
                 role="tab" aria-controls="calendar-view" aria-selected="false"
-                tabindex="-1">Calendar</button>
+                tabindex="-1">Calendar Data</button>
       </nav>
 
       <section id="clients-view" class="view" role="tabpanel" aria-labelledby="clients-tab">
@@ -48,13 +48,6 @@
 
       <section id="pages-view" class="view hidden" role="tabpanel"
                aria-labelledby="pages-tab">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">Effective calendar</p>
-            <h2 id="pages-heading">Available pages</h2>
-          </div>
-        </div>
-        <p class="muted">These are the appointment panels sent to the clocks.</p>
         <div id="pages" class="page-grid" aria-live="polite"></div>
       </section>
 
@@ -62,7 +55,6 @@
                aria-labelledby="calendar-tab">
         <div class="section-heading">
           <div>
-            <p class="eyebrow">Read-only source</p>
             <h2 id="calendar-heading">calendar.yaml</h2>
           </div>
         </div>
